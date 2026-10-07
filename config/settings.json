@@ -1,0 +1,7 @@
+{
+  "workflow_mode": "sub_only",
+  "speech_rate_sps": 4.5,
+  "max_speed": 1.2,
+  "lead_female_voice": "Hoài My",
+  "lead_male_voice": "Nam Minh"
+}

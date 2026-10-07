@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Lồng tiếng Douyin</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: light-dark(#f6f5f2, #141414);
+    --card: light-dark(#ffffff, #1e1e1e);
+    --ink: light-dark(#1b1b1b, #ececec);
+    --muted: light-dark(#6b6b6b, #9a9a9a);
+    --line: light-dark(#e4e2dc, #2e2e2e);
+    --accent: light-dark(#c2410c, #fb923c);
+    --accent-ink: light-dark(#ffffff, #1b1b1b);
+    --ok: light-dark(#15803d, #4ade80);
+    --warn: light-dark(#b45309, #fbbf24);
+    --bad: light-dark(#b91c1c, #f87171);
+    --track: light-dark(#ece9e2, #2a2a2a);
+    accent-color: var(--accent);
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+           padding: 14px 20px; border-bottom: 1px solid var(--line); background: var(--card); position: sticky; top: 0; z-index: 2; }
+  header h1 { font-size: 18px; margin: 0; letter-spacing: -0.01em; }
+  header .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--ok); margin-right: 6px; }
+  header .dot.off { background: var(--warn); }
+  main { max-width: 1100px; margin: 0 auto; padding: 18px 20px 60px; display: grid; gap: 16px; }
+  .top { display: grid; grid-template-columns: 1.6fr 1fr; gap: 16px; }
+  @media (max-width: 760px) { .top { grid-template-columns: 1fr; } }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  .card h2 { font-size: 14px; margin: 0 0 10px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+  textarea { width: 100%; min-height: 110px; resize: vertical; border: 1px solid var(--line); border-radius: 8px;
+             padding: 10px; font: inherit; background: var(--bg); color: var(--ink); }
+  button { font: inherit; border: 1px solid var(--line); background: var(--card); color: var(--ink);
+           border-radius: 8px; padding: 7px 12px; cursor: pointer; }
+  button:hover { border-color: var(--muted); }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; font-weight: 600; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+  .hint { color: var(--muted); font-size: 13px; }
+  .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .stat b { display: block; font-size: 22px; font-variant-numeric: tabular-nums; }
+  .stat span { color: var(--muted); font-size: 12.5px; }
+  .job { display: grid; grid-template-columns: 1fr auto; gap: 6px 14px; padding: 12px 0; border-top: 1px solid var(--line); }
+  .job:first-of-type { border-top: 0; }
+  .title { font-weight: 600; overflow-wrap: anywhere; }
+  .sub { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+  .chip { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 99px; margin-right: 6px;
+          border: 1px solid currentColor; }
+  .s-queued, .s-ready { color: var(--muted); } .s-running { color: var(--accent); } .s-done { color: var(--ok); }
+  .s-review { color: var(--warn); } .s-failed { color: var(--bad); }
+  .bar { display: grid; grid-template-columns: repeat(9, 1fr); gap: 3px; margin-top: 6px; max-width: 520px; }
+  .bar i { height: 6px; border-radius: 3px; background: var(--track); position: relative; overflow: hidden; }
+  .bar i.done { background: var(--ok); }
+  .bar i.cur::after { content: ""; position: absolute; inset: 0; width: var(--p, 10%); background: var(--accent); }
+  .actions { display: flex; gap: 6px; align-items: start; flex-wrap: wrap; justify-content: end; }
+  .actions button { padding: 4px 9px; font-size: 13px; }
+  .err { color: var(--bad); font-size: 13px; white-space: pre-wrap; max-height: 4.5em; overflow: hidden; }
+  .issues { color: var(--warn); font-size: 13px; }
+  dialog { border: 1px solid var(--line); border-radius: 12px; padding: 0; background: var(--card); color: var(--ink);
+           width: min(900px, 94vw); }
+  dialog::backdrop { background: rgb(0 0 0 / .55); }
+  dialog .head { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+  dialog .body { padding: 14px; }
+  dialog video { width: 100%; max-height: 75vh; background: #000; border-radius: 8px; }
+  dialog pre { margin: 0; max-height: 70vh; overflow: auto; font-size: 12px; white-space: pre-wrap; }
+  select { font: inherit; padding: 5px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
+  .empty { color: var(--muted); padding: 20px 0; text-align: center; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Lồng tiếng Douyin → Tiếng Việt</h1>
+  <div class="row" style="margin:0">
+    <span id="wstate" class="hint"><span class="dot"></span>Đang chạy</span>
+    <button id="pauseBtn">Tạm dừng</button>
+    <button id="openOut">Mở thư mục thành phẩm</button>
+  </div>
+</header>
+<main>
+  <section class="top">
+    <div class="card">
+      <h2>Thêm video</h2>
+      <textarea id="links" placeholder="Dán link Douyin vào đây, mỗi dòng 1 link (hoặc ngăn bằng dấu |)"></textarea>
+      <div class="row" style="margin-top:10px; margin-bottom:8px; background:var(--track); padding:8px 12px; border-radius:8px;">
+        <label class="hint" for="workflowMode" style="font-weight:600; color:var(--ink);">Chế độ xử lý:</label>
+        <select id="workflowMode" style="font-weight:600; padding:6px 10px; border-radius:6px; cursor:pointer;">
+          <option value="dub">🎙️ Lồng tiếng + VietSub (Đầy đủ giọng AI)</option>
+          <option value="sub_only">📝 Chỉ VietSub (Giữ 100% âm thanh & giọng gốc)</option>
+        </select>
+      </div>
+      <div class="row">
+        <button class="primary" id="addBtn">Thêm vào hàng chờ</button>
+        <span id="addMsg" class="hint"></span>
+      </div>
+      <p class="hint" style="margin:10px 0 0">Hoặc chép file video vào thư mục <b>DAU_VAO</b> — hệ thống tự nhận.</p>
+    </div>
+    <div class="card">
+      <h2>Tình trạng</h2>
+      <div class="stats">
+        <div class="stat"><b id="cToday">0</b><span>xong hôm nay</span></div>
+        <div class="stat"><b id="cQueue">0</b><span>đang chờ</span></div>
+        <div class="stat"><b id="cApi">0</b><span>lượt dịch AI hôm nay</span></div>
+        <div class="stat"><b id="cDisk">–</b><span>GB ổ cứng còn trống</span></div>
+      </div>
+      <div id="voiceConfigArea">
+        <div class="row">
+          <label class="hint" for="mode">Giọng đọc</label>
+          <select id="mode">
+            <option value="edgetts">Microsoft Edge-TTS (Truyền cảm, Đa cảm xúc, Siêu tốc)</option>
+            <option value="turbo">Chất lượng cao (VieNeu Turbo)</option>
+            <option value="nano">Nhanh (VieNeu Nano)</option>
+            <option value="voxcpm">OpenBMB VoxCPM2 (AI Diffusion, Clone giọng)</option>
+          </select>
+        </div>
+        <div class="row">
+          <label class="hint" for="leadF">Giọng nữ chính</label>
+          <select id="leadF">
+            <option value="Hoài My">Hoài My (truyền cảm Edge-TTS)</option>
+            <option value="Thục Đoan">Thục Đoan (kể chuyện)</option>
+            <option value="Mỹ Duyên">Mỹ Duyên (đọc truyện)</option>
+            <option value="Kim Thanh">Kim Thanh (đọc truyện)</option>
+            <option value="Thùy Dung">Thùy Dung (tin tức)</option>
+            <option value="">Tự chọn theo thể loại</option>
+          </select>
+          <label class="hint" for="leadM">Giọng nam chính</label>
+          <select id="leadM">
+            <option value="Nam Minh">Nam Minh (trầm ấm Edge-TTS)</option>
+            <option value="">Tự chọn theo thể loại</option>
+            <option value="Adam">Adam (tự nhiên)</option>
+            <option value="Thái Sơn">Thái Sơn (kể chuyện)</option>
+            <option value="Đức Trí">Đức Trí (đọc truyện)</option>
+            <option value="Minh Triết">Minh Triết (tin tức)</option>
+          </select>
+        </div>
+        <div class="row">
+          <label class="hint"><input type="checkbox" id="lanes"> Chạy 2 làn song song (nhanh hơn)</label>
+          <label class="hint"><input type="checkbox" id="variants"> Thêm biến thể giọng (trẻ/trầm/già/bé)</label>
+        </div>
+      </div>
+      <p id="subOnlyNotice" class="hint" style="color:var(--accent); margin:10px 0 0" hidden>✨ Chế độ <b>Chỉ VietSub</b> đang bật: giữ nguyên 100% âm thanh gốc, bỏ qua đọc giọng AI.</p>
+      <p id="keyWarn" class="err" hidden>Chưa có Gemini API key trong config/.env</p>
+    </div>
+  </section>
+  <section class="card">
+    <h2>Hàng chờ</h2>
+    <div id="jobs"><div class="empty">Chưa có video nào.</div></div>
+  </section>
+</main>
+
+<dialog id="dlg" closedby="any" aria-labelledby="dlgTitle">
+  <div class="head"><b id="dlgTitle">Xem</b><button id="dlgClose">Đóng</button></div>
+  <div class="body" id="dlgBody"></div>
+</dialog>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const STATUS = { queued: "Đang chờ", running: "Đang xử lý", ready: "Chờ lồng tiếng", done: "Xong", review: "Cần xem", failed: "Lỗi" };
+let STEPS = [];
+let paused = false;
+
+async function api(path, body) {
+  const r = await fetch(path, body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
+  return r.json();
+}
+
+function fmtTime(t) {
+  const tot = Object.values(t || {}).reduce((a, b) => a + b, 0);
+  if (!tot) return "";
+  const m = Math.floor(tot / 60), s = Math.round(tot % 60);
+  return `${m} phút ${s} giây`;
+}
+
+function jobHtml(j) {
+  const bar = STEPS.map((_, i) => {
+    let cls = "";
+    if (i < j.step_index) cls = "done";
+    else if (i === j.step_index && j.status === "running") cls = "cur";
+    const p = cls === "cur" ? ` style="--p:${Math.max(6, Math.round((j.frac || 0) * 100))}%"` : "";
+    return `<i class="${cls}"${p} title="${esc(STEPS[i])}"></i>`;
+  }).join("");
+  const title = j.title || j.input;
+  const step = j.status === "running" ? `${esc(j.step_label)}${j.note ? " · " + esc(j.note) : ""}` : (j.note ? esc(j.note) : "");
+  const took = (j.status === "done" || j.status === "review") ? ` · mất ${fmtTime(j.timings)}` : "";
+  let acts = "";
+  if (j.has_video) acts += `<button data-act="play" data-id="${j.id}">Xem</button><button data-act="reveal" data-id="${j.id}">Mở file</button>`;
+  if (j.status === "failed" || j.status === "review") acts += `<button data-act="retry" data-id="${j.id}">Chạy lại</button>`;
+  acts += `<button data-act="log" data-id="${j.id}">Nhật ký</button><button data-act="remove" data-id="${j.id}">Xóa</button>`;
+  const modeChip = j.mode === "sub_only" ? '<span class="chip" style="color:var(--accent);border-color:currentColor">📝 Chỉ VietSub</span>' : '<span class="chip" style="color:var(--ok);border-color:currentColor">🎙️ Lồng tiếng</span>';
+  return `<div class="job">
+    <div>
+      <div class="title">#${j.id} ${esc(title)}</div>
+      <div class="sub">${modeChip}<span class="chip s-${j.status}">${STATUS[j.status] || j.status}</span>${step}${took}</div>
+      <div class="bar">${bar}</div>
+      ${j.status === "failed" && j.error ? `<div class="err">${esc(j.error)}</div>` : ""}
+      ${j.issues && j.issues.length ? `<div class="issues">⚠ ${esc(j.issues.join(" · "))}</div>` : ""}
+      ${j.title ? `<div class="sub">${esc(j.input)}</div>` : ""}
+    </div>
+    <div class="actions">${acts}</div>
+  </div>`;
+}
+
+async function refresh() {
+  try {
+    const s = await api("/api/state");
+    STEPS = s.steps;
+    paused = !!s.settings.paused;
+    $("#pauseBtn").textContent = paused ? "Tiếp tục" : "Tạm dừng";
+    $("#wstate").innerHTML = `<span class="dot ${paused ? "off" : ""}"></span>${paused ? "Đã tạm dừng" : "Đang chạy"}`;
+    $("#cToday").textContent = s.counts.today || 0;
+    $("#cQueue").textContent = (s.counts.queued || 0) + (s.counts.running || 0) + (s.counts.ready || 0);
+    $("#cApi").textContent = Object.values(s.api_today || {}).reduce((a, b) => a + b, 0);
+    $("#cDisk").textContent = s.disk_free_gb;
+    $("#keyWarn").hidden = s.has_key;
+
+    const wf = s.settings.workflow_mode || "dub";
+    if ($("#workflowMode") && document.activeElement !== $("#workflowMode")) {
+      $("#workflowMode").value = wf;
+    }
+    if (wf === "sub_only") {
+      $("#voiceConfigArea").style.opacity = "0.35";
+      $("#voiceConfigArea").style.pointerEvents = "none";
+      $("#subOnlyNotice").hidden = false;
+    } else {
+      $("#voiceConfigArea").style.opacity = "1";
+      $("#voiceConfigArea").style.pointerEvents = "auto";
+      $("#subOnlyNotice").hidden = true;
+    }
+
+    if (document.activeElement !== $("#mode")) $("#mode").value = s.settings.tts_mode || "turbo";
+    if (document.activeElement !== $("#leadF")) $("#leadF").value = s.settings.lead_female_voice ?? "Thục Đoan";
+    if (document.activeElement !== $("#leadM")) $("#leadM").value = s.settings.lead_male_voice ?? "";
+    $("#lanes").checked = s.settings.parallel_lanes !== false;
+    $("#variants").checked = s.settings.voice_variants !== false;
+    $("#jobs").innerHTML = s.jobs.length ? s.jobs.map(jobHtml).join("") : `<div class="empty">Chưa có video nào.</div>`;
+  } catch (e) {
+    $("#wstate").innerHTML = `<span class="dot off"></span>Mất kết nối — ứng dụng đã tắt?`;
+  }
+}
+
+function openDialog(title, html) {
+  $("#dlgTitle").textContent = title;
+  $("#dlgBody").innerHTML = html;
+  $("#dlg").showModal();
+}
+$("#dlgClose").onclick = () => $("#dlg").close();
+$("#dlg").addEventListener("close", () => { $("#dlgBody").innerHTML = ""; });
+if (!("closedBy" in HTMLDialogElement.prototype)) {
+  const dialog = $("#dlg");
+  dialog.addEventListener("click", (event) => {
+    if (event.target !== dialog) return;
+    const r = dialog.getBoundingClientRect();
+    const inside = r.top <= event.clientY && event.clientY <= r.top + r.height && r.left <= event.clientX && event.clientX <= r.left + r.width;
+    if (!inside) dialog.close();
+  });
+}
+
+$("#jobs").addEventListener("click", async (e) => {
+  const b = e.target.closest("button[data-act]");
+  if (!b) return;
+  const id = Number(b.dataset.id), act = b.dataset.act;
+  if (act === "play") openDialog(`Video #${id}`, `<video src="/video/${id}" controls autoplay playsinline></video>`);
+  if (act === "reveal") api("/api/open", { id });
+  if (act === "retry") { await api("/api/retry", { id }); refresh(); }
+  if (act === "remove") { if (confirm("Xóa video này khỏi hàng chờ? (file thành phẩm vẫn giữ)")) { await api("/api/remove", { id }); refresh(); } }
+  if (act === "log") { const r = await api(`/api/log/${id}`); openDialog(`Nhật ký #${id}`, `<pre>${esc(r.log)}</pre>`); }
+});
+
+$("#workflowMode").onchange = async (e) => {
+  const val = e.target.value;
+  if (val === "sub_only") {
+    $("#voiceConfigArea").style.opacity = "0.35";
+    $("#voiceConfigArea").style.pointerEvents = "none";
+    $("#subOnlyNotice").hidden = false;
+  } else {
+    $("#voiceConfigArea").style.opacity = "1";
+    $("#voiceConfigArea").style.pointerEvents = "auto";
+    $("#subOnlyNotice").hidden = true;
+  }
+  await api("/api/settings", { workflow_mode: val });
+  refresh();
+};
+
+$("#addBtn").onclick = async () => {
+  const text = $("#links").value;
+  if (!text.trim()) return;
+  const workflow_mode = $("#workflowMode") ? $("#workflowMode").value : "dub";
+  const r = await api("/api/add", { text, workflow_mode });
+  $("#addMsg").textContent = r.found ? `Đã thêm ${r.added}/${r.found} video` : "Không thấy link nào";
+  if (r.added) $("#links").value = "";
+  refresh();
+};
+$("#pauseBtn").onclick = async () => { await api("/api/settings", { paused: !paused }); refresh(); };
+$("#openOut").onclick = () => api("/api/open", {});
+$("#mode").onchange = (e) => api("/api/settings", { tts_mode: e.target.value });
+$("#leadF").onchange = (e) => api("/api/settings", { lead_female_voice: e.target.value });
+$("#leadM").onchange = (e) => api("/api/settings", { lead_male_voice: e.target.value });
+$("#lanes").onchange = (e) => api("/api/settings", { parallel_lanes: e.target.checked });
+$("#variants").onchange = (e) => api("/api/settings", { voice_variants: e.target.checked });
+
+refresh();
+setInterval(refresh, 2000);
+</script>
+</body>
+</html>

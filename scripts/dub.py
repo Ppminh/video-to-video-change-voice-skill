@@ -26,6 +26,12 @@ import time
 from pathlib import Path
 
 
+HERE = Path(__file__).resolve().parent
+ROOT = HERE.parent
+if str(ROOT / "app") not in sys.path:
+    sys.path.insert(0, str(ROOT / "app"))
+
+
 def _imports():
     from dubber import db, paths  # noqa: F401
     from dubber.steps import STEP_LABELS, STEPS  # noqa: F401
@@ -43,16 +49,33 @@ def cmd_where(args):
     import shutil
     du = shutil.disk_usage(str(paths.ROOT))
     lock_busy = False
-    try:
-        import fcntl
-        fh = open(paths.WORK / "worker.lock", "a")
+    lock_file = paths.WORK / "worker.lock"
+    if lock_file.exists():
         try:
-            fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            fcntl.flock(fh, fcntl.LOCK_UN)
-        except OSError:
-            lock_busy = True
-    except Exception:
-        pass
+            import fcntl
+            fh = open(lock_file, "a")
+            try:
+                fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                fcntl.flock(fh, fcntl.LOCK_UN)
+            except OSError:
+                lock_busy = True
+            finally:
+                fh.close()
+        except ImportError:
+            try:
+                import msvcrt
+                fh = open(lock_file, "a")
+                try:
+                    msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+                    msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+                except (OSError, IOError):
+                    lock_busy = True
+                finally:
+                    fh.close()
+            except Exception:
+                pass
+        except Exception:
+            pass
     info = {
         "du_an": str(paths.ROOT), "python": sys.executable, "model": str(paths.MODELS),
         "thanh_pham": str(paths.OUTPUT), "thu_muc_lam_viec": str(paths.WORK), "dau_vao": str(paths.INPUT_DIR),

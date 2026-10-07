@@ -1,5 +1,23 @@
+# Python & Bytecode
 __pycache__/
 *.py[cod]
 *$py.class
-.DS_Store
 *.tmp
+.DS_Store
+
+# Secrets & Environment
+config/.env
+*.env
+
+# Runtime working files, media & logs
+_work/
+THANH_PHAM/
+DAU_VAO/
+logs/
+*.wav
+*.mp3
+test_audio.wav
+test_tts.mp3
+
+# Agents internal directory
+.agents/

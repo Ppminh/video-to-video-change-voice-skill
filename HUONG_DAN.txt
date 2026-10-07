@@ -1,0 +1,53 @@
+HỆ THỐNG LỒNG TIẾNG DOUYIN -> TIẾNG VIỆT (giọng miền Nam)
+============================================================
+
+CÀI ĐẶT (chỉ 1 lần, 10-25 phút)
+  1. Cắm sạc cho Mac.
+  2. Nhấp đúp file  1_CAI_DAT.command
+     - Nếu Mac báo "không mở được vì không xác định nhà phát triển":
+       chuột phải vào file -> Open -> Open.
+  3. Chờ đến khi thấy dòng "CAI DAT XONG".
+     - Giọng mẫu để nghe thử nằm trong logs/giong_mau/
+
+SỬ DỤNG HẰNG NGÀY
+  1. Nhấp đúp  2_MO_UNG_DUNG.command  -> trình duyệt tự mở trang điều khiển.
+  2. Dán link Douyin (mỗi dòng 1 link) -> bấm "Thêm vào hàng chờ".
+     Hoặc chép file video vào thư mục DAU_VAO.
+  3. Video xong nằm trong thư mục THANH_PHAM/<ngày>/
+     Kèm file .srt (phụ đề Việt) và .txt (tiêu đề, tóm tắt để đăng bài).
+  4. Giữ cửa sổ Terminal mở trong lúc chạy (thu nhỏ được). Đóng cửa sổ = tắt ứng dụng.
+  5. Trên trang điều khiển có thể chọn: giọng nữ chính / nam chính, bật-tắt "Chạy 2 làn song song"
+     (nhanh gần gấp đôi; máy đơ thì tắt), bật-tắt "biến thể giọng" (trẻ/trầm/già/bé).
+     Trạng thái "Chờ lồng tiếng" = video đã chuẩn bị xong, đang chờ làn đọc giọng.
+
+DÙNG VỚI GOOGLE ANTIGRAVITY (agent AI làm thay bạn)
+  - Mở thư mục dự án này trong Antigravity: agent tự thấy skill "douyin-long-tieng"
+    (nằm trong .agents/skills/) và quy tắc trong AGENTS.md.
+  - Muốn dùng ở mọi nơi: nhấp đúp 6_CAI_SKILL_ANTIGRAVITY.command (chép skill vào ~/.gemini/config/skills/).
+  - Sau đó chỉ cần nói với agent, ví dụ: "lồng tiếng giúp tôi link này ...", "video #5 sao lỗi?",
+    "đổi giọng nam chính trầm hơn", "xem bước nào đang chậm".
+
+CÁC THƯ MỤC
+  THANH_PHAM/   video đã lồng tiếng
+  DAU_VAO/      bỏ video có sẵn vào đây để tự xử lý
+  config/.env   chứa Gemini API key (GEMINI_API_KEY=...)
+  config/settings.json   cài đặt (tự tạo khi đổi trong giao diện)
+  logs/         nhật ký cài đặt, chạy, kiểm tra
+  _work/        file tạm của từng video (tự dọn khi xong)
+  app/          mã nguồn
+
+CÁCH HỆ THỐNG HOẠT ĐỘNG (9 bước cho mỗi video)
+  1. Tải video Douyin bản không logo.
+  2. Tách giọng nói khỏi nhạc nền (demucs-mlx, chạy GPU chip Apple).
+  3. Nghe tiếng Trung (SenseVoice) + phân biệt ai đang nói + đoán nam/nữ theo cao độ giọng.
+  4. Dò chữ Trung trên hình (RapidOCR, chỉ đọc dải phụ đề) để làm mờ và giúp dịch đúng hơn.
+  5. Dịch + Việt hóa bằng Gemini Flash-Lite (miễn phí, dự phòng Gemma 4), giới hạn số âm tiết theo thời gian.
+  6. Chọn giọng miền Nam theo nhân vật (giới tính, tuổi) và thể loại; nữ chính = Thục Đoan.
+     Mỗi giọng có thêm biến thể trẻ/trầm/già/bé (đổi cao độ bằng Praat) -> hơn 30 giọng khác nhau.
+  7. Đọc giọng Việt (VieNeu-TTS) + khớp thời gian (rút gọn câu / tăng tốc nhẹ).
+  8. Trộn với nhạc nền gốc, hạ nhạc khi có lời, chuẩn hóa độ to -14 LUFS.
+  9. Xuất video: làm mờ chữ Trung + phụ đề Việt, nén bằng chip M1.
+
+GIỌNG MIỀN NAM CÓ SẴN
+  Nam: Thái Sơn (kể chuyện), Minh Triết (tin tức), Đức Trí (đọc truyện), Adam (tự nhiên)
+  Nữ : Thục Đoan (kể chuyện), Mỹ Duyên (đọc truyện), Kim Thanh (đọc truyện), Thùy Dung (tin tức)

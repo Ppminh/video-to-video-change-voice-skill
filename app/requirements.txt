@@ -1,0 +1,16 @@
+# Thư viện cho hệ thống lồng tiếng (Python 3.11, Mac Apple Silicon)
+numpy
+soundfile
+soxr
+requests
+psutil
+pillow
+json-repair
+praat-parselmouth
+pyloudnorm
+google-genai
+yt-dlp
+sherpa-onnx==1.13.8
+rapidocr_onnxruntime==1.4.4
+vieneu==3.8.3
+playwright

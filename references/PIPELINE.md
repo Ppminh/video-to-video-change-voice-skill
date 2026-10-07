@@ -65,10 +65,14 @@ Bản tối ưu chia làm 2 lượt:
 - **Tối ưu:** `thinking_level="minimal"`, tức là tắt chế độ suy nghĩ; Gemma 4 31B có suy nghĩ mất khoảng 190 giây. `response_mime_type="application/json"` để AI trả về JSON thuần. Model không nhận các tùy chọn này thì tự bỏ tùy chọn và thử lại.
 
 ## 6. tts – Đọc giọng Việt và khớp thời gian (`steps/tts.py`, `ttsload.py`)
-- **VieNeu-TTS v3 Turbo** (ONNX, CPU, 48kHz, Apache-2.0) có 8 giọng miền Nam:
+- **VieNeu-TTS v3 Turbo** (mặc định: `tts_mode=turbo`, ONNX, CPU, 48kHz, Apache-2.0) có 8 giọng miền Nam:
   - Nam: Thái Sơn, Minh Triết, Đức Trí, Adam.
   - Nữ: Thục Đoan, Mỹ Duyên, Kim Thanh, Thùy Dung.
-  - RTF khoảng 0.35–0.6, tức 10 giây giọng đọc mất 3,5–6 giây.
+  - RTF khoảng 0.35–0.6 trên CPU, tốc độ nhanh và nhẹ RAM.
+- **OpenBMB VoxCPM2** (tùy chọn: `tts_mode=voxcpm`, model `openbmb/VoxCPM2`):
+  - Mô hình Diffusion Autoregressive 2B thông minh từ OpenBMB, hỗ trợ tiếng Việt bản xứ.
+  - Khả năng **Voice Cloning** (sao chép bất kỳ giọng mẫu nào từ file audio mẫu hoặc giọng của diễn viên) và **Voice Design**.
+  - Chất lượng âm thanh cao cấp 48kHz. Khuyên dùng khi có GPU hoặc khi cần sao chép giọng đặc thù.
   - `ttsload.materialize()` biến symlink trong cache HuggingFace thành file thật. Cần làm vậy vì onnxruntime bản mới từ chối file dữ liệu nằm ngoài thư mục model.
 - **Biến thể giọng:** dùng Praat "Change gender" (PSOLA) để đổi cao độ và formant mà vẫn giữ nguyên tốc độ nói.
   - trẻ: +2 nửa cung, formant ×1.04

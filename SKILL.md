@@ -103,6 +103,10 @@ Lưu ý:
   - Nữ: Thục Đoan, Mỹ Duyên, Kim Thanh, Thùy Dung.
   - Nam: Adam, Thái Sơn, Đức Trí, Minh Triết.
 - Danh sách ưu tiên theo thể loại: `genre_voices` (các thể loại `co_trang`, `ban_hang`, `kien_thuc`, `review_phim`, `hai`, `default`). Biến thể giọng: `voice_variants=true/false`.
+- **Đổi công nghệ giọng đọc (TTS Engine):**
+  - `settings tts_mode=turbo`: VieNeu-TTS v3 Turbo (mặc định, CPU cực nhanh, 8 giọng miền Nam chuẩn).
+  - `settings tts_mode=nano`: VieNeu-TTS v3 Nano (nhanh gấp 3 lần).
+  - `settings tts_mode=voxcpm voxcpm_model=openbmb/VoxCPM2`: OpenBMB VoxCPM2 (AI Diffusion 2B, tiếng Việt, sao chép giọng - Voice Cloning từ file mẫu).
 - Làm lại giọng cho video đã xong: `retry <id> --from tts`. Hệ thống tự chạy lại bước tách nhạc nếu file âm thanh trung gian đã bị dọn. Bản dịch cũ được giữ nguyên, không tốn lượt AI.
 - Cho người dùng nghe mẫu giọng: `doctor voices`, mẫu nằm ở `logs/giong_mau/`.
 
