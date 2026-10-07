@@ -20,7 +20,7 @@ Skill dành cho **Google Antigravity**: Tự động đổi giọng nói và l�
 
 ### Cách 1: Clone vào thư mục Skill của Antigravity
 ```bash
-git clone https://github.com/hungdata/video-to-video-change-voice-skill.git ~/.gemini/config/skills/video-to-video-change-voice
+git clone https://github.com/Ppminh/video-to-video-change-voice-skill.git ~/.gemini/config/skills/video-to-video-change-voice
 ```
 
 ### Cách 2: Khởi tạo dự án lồng tiếng trên máy mới
