@@ -28,7 +28,7 @@ from .steps import STEPS
 from .utils import read_json, wait_for_memory, write_json
 
 VIDEO_EXT = {".mp4", ".mov", ".mkv", ".webm", ".m4v"}
-RETRYABLE = {"download", "translate", "tts"}
+RETRYABLE = set(STEPS)                     # Tự động thử lại thông minh cho toàn bộ 9 bước
 PREP = STEPS[:STEPS.index("tts")]          # download, separate, transcribe, ocr, translate
 VOICE = STEPS[STEPS.index("tts"):]         # tts, mix, render, qc
 NEED_MB = {"separate": 1000, "tts": 1000, "transcribe": 800, "ocr": 600}
@@ -166,6 +166,9 @@ class Worker:
 
     def _pick(self, lane: str, parallel: bool, ahead: int):
         with self.lock:
+            if not parallel and self.claimed:
+                # Chế độ tuần tự nghiêm ngặt (concurrency = 1): Đang có video chạy -> không nhận thêm video nào
+                return None
             cands = [j for j in db.candidates() if j["id"] not in self.claimed]
             if lane == "prep" and parallel:
                 waiting = sum(1 for j in cands if j["status"] == "ready")
@@ -240,8 +243,9 @@ class Worker:
                 msg = err.read_text(encoding="utf-8") if err.exists() else f"Bước {step} lỗi (mã {rc})"
                 attempts = ((db.get(jid) or job).get("attempts") or 0) + 1
                 if step in RETRYABLE and attempts < 3:
+                    backoff_sec = [5, 15, 30][min(attempts - 1, 2)]
                     db.update(jid, status="queued", attempts=attempts, error=msg[:1000],
-                              not_before=time.time() + 120 * attempts, note=f"sẽ thử lại (lần {attempts + 1})")
+                              not_before=time.time() + backoff_sec, note=f"sẽ thử lại sau {backoff_sec}s (lần {attempts + 1}/3)")
                 else:
                     db.update(jid, status="failed", attempts=attempts, error=msg[:1000], finished=time.time())
                 return

@@ -295,9 +295,13 @@ class SpeakerEncoder(nn.Module):
     def _load_pretrained(self):
         # Local cache directory within the project
         project_root = os.getcwd()
-        cache_dir = os.path.join(project_root, "pretrained", "hasp")
-        os.makedirs(cache_dir, exist_ok=True)
-        model_path = os.path.join(cache_dir, "pytorch_model.bin")
+        d_hasp_path = os.path.join(r"D:\Makemoney\models\valtec_zeroshot", "hasp", "pytorch_model.bin")
+        if os.path.exists(d_hasp_path):
+            model_path = d_hasp_path
+        else:
+            cache_dir = os.path.join(project_root, "pretrained", "hasp")
+            os.makedirs(cache_dir, exist_ok=True)
+            model_path = os.path.join(cache_dir, "pytorch_model.bin")
 
         if not os.path.exists(model_path):
             print(f"[SpeakerEncoder] Downloading pretrained model to {cache_dir}...")

@@ -396,11 +396,72 @@ class ValtecTTSWrapper:
         return [(name, name) for name in self._preset_voices]
 
 
+class ValtecZeroShotWrapper:
+    """Wrapper cho Valtec Zero-Shot Voice Cloning (HASP + VITS): sao chép giọng từ 3-8s audio gốc."""
+    def __init__(self, model_dir: Path | str | None = None, device: str = "cpu"):
+        import sys
+        from . import paths
+        site_pkg = Path("D:/Makemoney/site-packages")
+        if site_pkg.exists() and str(site_pkg) not in sys.path:
+            sys.path.insert(0, str(site_pkg))
+
+        vendor_dir = paths.APP_DIR / "dubber" / "vendor" / "v_tts"
+        if str(vendor_dir) not in sys.path:
+            sys.path.insert(0, str(vendor_dir))
+
+        if model_dir is None:
+            model_dir = paths.VALTEC_ZEROSHOT_DIR / "zeroshot"
+        self.model_dir = Path(model_dir)
+
+        from v_tts import ZeroShotTTS
+        ckpt = self.model_dir / "G_175000.pth"
+        cfg = self.model_dir / "config.json"
+        self.tts = ZeroShotTTS(
+            checkpoint_path=str(ckpt) if ckpt.exists() else None,
+            config_path=str(cfg) if cfg.exists() else None,
+            device=device,
+        )
+        self.sample_rate = 24000
+        self._preset_voices = {
+            "Gốc (Voice Clone)": {"gender": "auto"},
+            "Valtec SF": {"gender": "female"},
+            "Valtec SM": {"gender": "male"},
+        }
+
+    def infer(self, text: str, voice: str | None = None, ref_wav: str | None = None, speed: float = 1.0, **kwargs):
+        import numpy as np
+        clean_txt = (text or "").strip()
+        if not clean_txt or not any(c.isalnum() for c in clean_txt):
+            return np.zeros(int(self.sample_rate * 0.4), dtype=np.float32)
+
+        length_scale = 1.0 / max(0.5, min(2.0, float(speed))) if speed else 1.0
+        if not ref_wav or not Path(ref_wav).exists():
+            from . import paths
+            vendor_ex = paths.APP_DIR / "dubber" / "vendor" / "v_tts" / "examples" / "zeroshot" / "example_hoang_nam.wav"
+            ref_wav = str(vendor_ex) if vendor_ex.exists() else None
+
+        if ref_wav and Path(ref_wav).exists():
+            audio, sr = self.tts.synthesize(clean_txt, reference_audio=str(ref_wav), length_scale=length_scale)
+        else:
+            return np.zeros(int(self.sample_rate * 0.4), dtype=np.float32)
+
+        if audio is None or len(audio) == 0:
+            return np.zeros(int(self.sample_rate * 0.4), dtype=np.float32)
+        if audio.dtype != np.float32:
+            audio = audio.astype(np.float32)
+        return audio
+
+    def list_preset_voices(self):
+        return [(name, name) for name in self._preset_voices]
+
+
 def load(mode: str = "edgetts", threads: int = 4, precision: str = "fp32", **kwargs):
     if mode == "edgetts":
         return EdgeTTSWrapper()
     if mode == "valtec":
         return ValtecTTSWrapper(model_dir=kwargs.get("valtec_model_dir"))
+    if mode == "valtec_zeroshot":
+        return ValtecZeroShotWrapper(model_dir=kwargs.get("valtec_zeroshot_model_dir"))
     if mode == "voxcpm":
         model_id = kwargs.get("voxcpm_model", "openbmb/VoxCPM2")
         timesteps = int(kwargs.get("voxcpm_timesteps", 10))

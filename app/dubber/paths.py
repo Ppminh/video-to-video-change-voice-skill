@@ -26,6 +26,7 @@ HF_CACHE = Path("D:/Makemoney/.cache/huggingface") if Path("D:/Makemoney").exist
 os.environ.setdefault("HF_HOME", str(HF_CACHE))
 os.environ.setdefault("HF_HUB_CACHE", str(HF_CACHE / "hub"))
 VALTEC_MODEL_DIR = Path("D:/Makemoney/models/valtec_tts") if Path("D:/Makemoney/models/valtec_tts").exists() else MODELS / "valtec_tts"
+VALTEC_ZEROSHOT_DIR = Path("D:/Makemoney/models/valtec_zeroshot") if Path("D:/Makemoney/models/valtec_zeroshot").exists() else MODELS / "valtec_zeroshot"
 
 IS_MAC = sys.platform == "darwin"
 
@@ -69,9 +70,12 @@ DEFAULT_SETTINGS = {
     "video_bitrate": "6M",
     "keep_work_files": False,
     "paused": False,
-    # chạy 2 làn song song: làn 1 (tải, tách nhạc, nghe, OCR, dịch) chuẩn bị video kế tiếp
-    # trong khi làn 2 (đọc giọng, trộn, xuất video) làm video hiện tại -> nhanh gần gấp đôi
-    "parallel_lanes": True,
+    # Chạy tuần tự nghiêm ngặt (concurrency = 1): 1 video làm xong mới đến video tiếp theo, không xử lý 2 video cùng lúc
+    "parallel_lanes": False,
+    # Đồng bộ âm sắc giọng nói: 'match_eq' (Spectral Match EQ), 'zeroshot' (sao chép giọng mẫu), 'off' (tắt)
+    "voice_match_mode": "match_eq",
+    # Tự động cân bằng cao độ F0 trung bình khớp với nhân vật gốc
+    "pitch_match": True,
     # giọng chính: nữ chính luôn dùng giọng này (để trống = theo thể loại)
     "lead_female_voice": "Thục Đoan",
     "lead_male_voice": "",

@@ -112,6 +112,7 @@
           <label class="hint" for="mode">Giọng đọc</label>
           <select id="mode">
             <option value="edgetts">Microsoft Edge-TTS (Truyền cảm, Đa cảm xúc, Siêu tốc)</option>
+            <option value="valtec_zeroshot">Valtec Zero-Shot (Sao chép màu giọng gốc diễn viên từ video)</option>
             <option value="valtec">Valtec TTS (Siêu nhẹ 75M, Offline CPU, Đa giọng Bắc/Nam)</option>
             <option value="turbo">Chất lượng cao (VieNeu Turbo)</option>
             <option value="nano">Nhanh (VieNeu Nano)</option>
@@ -144,8 +145,9 @@
           </select>
         </div>
         <div class="row">
-          <label class="hint"><input type="checkbox" id="lanes"> Chạy 2 làn song song (nhanh hơn)</label>
-          <label class="hint"><input type="checkbox" id="variants"> Thêm biến thể giọng (trẻ/trầm/già/bé)</label>
+          <label class="hint"><input type="checkbox" id="lanes"> Chạy song song (Tắt = làm tuần tự 1 video)</label>
+          <label class="hint"><input type="checkbox" id="matchEq"> Đồng bộ âm sắc (Spectral Match EQ)</label>
+          <label class="hint"><input type="checkbox" id="variants"> Biến thể giọng (trẻ/trầm/già/bé)</label>
         </div>
       </div>
       <p id="subOnlyNotice" class="hint" style="color:var(--accent); margin:10px 0 0" hidden>✨ Chế độ <b>Chỉ VietSub</b> đang bật: giữ nguyên 100% âm thanh gốc, bỏ qua đọc giọng AI.</p>
@@ -241,7 +243,8 @@ async function refresh() {
     if (document.activeElement !== $("#mode")) $("#mode").value = s.settings.tts_mode || "turbo";
     if (document.activeElement !== $("#leadF")) $("#leadF").value = s.settings.lead_female_voice ?? "Thục Đoan";
     if (document.activeElement !== $("#leadM")) $("#leadM").value = s.settings.lead_male_voice ?? "";
-    $("#lanes").checked = s.settings.parallel_lanes !== false;
+    $("#lanes").checked = s.settings.parallel_lanes === true;
+    $("#matchEq").checked = s.settings.voice_match_mode !== "off";
     $("#variants").checked = s.settings.voice_variants !== false;
     $("#jobs").innerHTML = s.jobs.length ? s.jobs.map(jobHtml).join("") : `<div class="empty">Chưa có video nào.</div>`;
   } catch (e) {
@@ -307,6 +310,7 @@ $("#mode").onchange = (e) => api("/api/settings", { tts_mode: e.target.value });
 $("#leadF").onchange = (e) => api("/api/settings", { lead_female_voice: e.target.value });
 $("#leadM").onchange = (e) => api("/api/settings", { lead_male_voice: e.target.value });
 $("#lanes").onchange = (e) => api("/api/settings", { parallel_lanes: e.target.checked });
+$("#matchEq").onchange = (e) => api("/api/settings", { voice_match_mode: e.target.checked ? "match_eq" : "off" });
 $("#variants").onchange = (e) => api("/api/settings", { voice_variants: e.target.checked });
 
 refresh();

@@ -88,7 +88,7 @@ def label(base: str, variant: str) -> str:
 def _pools(s: dict, tts_mode: str, genre: str, available: dict) -> dict:
     if tts_mode == "nano":
         pools = s.get("nano_voices", {})
-    elif tts_mode == "valtec":
+    elif tts_mode in ("valtec", "valtec_zeroshot"):
         pools = s.get("valtec_voices") or {"male": ["Valtec SM", "Valtec NM1", "Valtec NM2"],
                                             "female": ["Valtec SF", "Valtec NF"]}
     else:
@@ -249,6 +249,48 @@ def run(job: Job) -> None:
     except Exception:
         pass
 
+    # Đọc vocals để phục vụ Spectral Match EQ và Zero-shot voice cloning
+    orig_vocals = None
+    orig_vocals_sr = 16000
+    try:
+        import soundfile as sf
+        if vocals_f.exists():
+            orig_vocals, orig_vocals_sr = sf.read(str(vocals_f), dtype="float32")
+            if orig_vocals.ndim > 1:
+                orig_vocals = np.mean(orig_vocals, axis=1)
+    except Exception as e:
+        log(f"Không thể đọc vocals để Match EQ: {e}")
+
+    # Trích xuất mẫu giọng chuẩn 3-8s của từng nhân vật phục vụ Voice Cloning
+    speaker_ref_wavs = {}
+    if orig_vocals is not None:
+        spk_snippets_dir = out_dir / "spk_refs"
+        spk_snippets_dir.mkdir(parents=True, exist_ok=True)
+        for spk_id in tr.get("speakers", {}):
+            best_line = None
+            best_dur = 0.0
+            for l_cand in lines:
+                if l_cand.get("spk") == spk_id:
+                    d_c = float(l_cand["end"]) - float(l_cand["start"])
+                    if 3.0 <= d_c <= 8.0 and d_c > best_dur:
+                        best_line = l_cand
+                        best_dur = d_c
+            if not best_line:
+                for l_cand in lines:
+                    if l_cand.get("spk") == spk_id:
+                        d_c = float(l_cand["end"]) - float(l_cand["start"])
+                        if d_c > best_dur:
+                            best_line = l_cand
+                            best_dur = d_c
+            if best_line:
+                s_idx = max(0, int(float(best_line["start"]) * orig_vocals_sr))
+                e_idx = min(len(orig_vocals), int(float(best_line["end"]) * orig_vocals_sr))
+                clip = orig_vocals[s_idx:e_idx]
+                if len(clip) > int(orig_vocals_sr * 1.0):
+                    ref_p = spk_snippets_dir / f"spk_{spk_id}.wav"
+                    save_audio(ref_p, clip, orig_vocals_sr)
+                    speaker_ref_wavs[spk_id] = str(ref_p)
+
     def cinfo(ln):
         return casting.get(ln["spk"]) or {"voice": "", "base": None, "variant": ""}
 
@@ -257,15 +299,16 @@ def run(job: Job) -> None:
         emo = emos.get(ln["id"], "")
         p_info = pitch_profiles.get(ln["id"]) or pitch_profiles.get(str(ln["id"])) or {}
         prosody = map_pitch_to_prosody(p_info, voice_name=c["voice"], base_voice=c["base"], emotion=emo, safe_volume=True)
-        if mode == "voxcpm":
-            ref_wav = None
-            sample_dir = paths.LOGS / "giong_mau"
-            if sample_dir.exists():
-                for pat in (f"*_{c['voice']}.wav", f"*{c['voice']}*.wav"):
-                    found = list(sample_dir.glob(pat))
-                    if found:
-                        ref_wav = str(found[0])
-                        break
+        if mode in ("voxcpm", "valtec_zeroshot"):
+            ref_wav = speaker_ref_wavs.get(ln["spk"])
+            if not ref_wav and mode == "voxcpm":
+                sample_dir = paths.LOGS / "giong_mau"
+                if sample_dir.exists():
+                    for pat in (f"*_{c['voice']}.wav", f"*{c['voice']}*.wav"):
+                        found = list(sample_dir.glob(pat))
+                        if found:
+                            ref_wav = str(found[0])
+                            break
             a = tts.infer(normalize_vi(text), voice=c["voice"], ref_wav=ref_wav)
         elif mode == "edgetts":
             a = tts.infer(normalize_vi(text), voice=c["base"] or c["voice"], emotion=emo,
@@ -274,8 +317,22 @@ def run(job: Job) -> None:
         else:
             a = tts.infer(normalize_vi(text), voice=c["base"] or c["voice"])
         a = trim_silence(np.asarray(a, dtype=np.float32), sr)
-        if mode not in ("voxcpm", "edgetts"):
+        if mode not in ("voxcpm", "edgetts", "valtec_zeroshot"):
             a = apply_variant(a, sr, c["variant"])
+
+        # KỸ THUẬT SPECTRAL MATCH EQ: Uốn nắn phổ dải tần số của giọng TTS theo dải tần gốc của câu thoại
+        voice_match_mode = s.get("voice_match_mode", "match_eq")
+        if voice_match_mode != "off" and orig_vocals is not None and len(a) > sr * 0.2:
+            try:
+                from ..matcheq import apply_match_eq
+                st_sample = max(0, int(float(ln["start"]) * orig_vocals_sr))
+                en_sample = min(len(orig_vocals), int(float(ln["end"]) * orig_vocals_sr))
+                ref_slice = orig_vocals[st_sample:en_sample]
+                if len(ref_slice) >= int(orig_vocals_sr * 0.3):
+                    a, _ = apply_match_eq(ref_slice, a, sr=sr, max_gain_db=6.0)
+            except Exception:
+                pass
+
         # R2: Chuẩn hóa biên độ đỉnh an toàn (peak headroom -1.5 dBFS) cho từng clip thoại riêng lẻ
         pk = float(np.max(np.abs(a))) if len(a) > 0 else 0.0
         target_clip_peak = 10.0 ** (-1.5 / 20.0) # ~0.8414

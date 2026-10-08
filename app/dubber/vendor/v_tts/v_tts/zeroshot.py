@@ -30,7 +30,7 @@ except ImportError:
     HF_HUB_AVAILABLE = False
 
 
-DEFAULT_ZEROSHOT_HF_REPO = "v-tts/v-zeroshot-voice-cloning"
+DEFAULT_ZEROSHOT_HF_REPO = "letrggghieu/v-zeroshot-voice-cloning"
 DEFAULT_ZEROSHOT_MODEL_NAME = "zeroshot-vietnamese"
 
 
@@ -95,6 +95,11 @@ class ZeroShotTTS:
 
     def _ensure_model_available(self) -> str:
         """Check local cache or download from HuggingFace."""
+        # Check D drive models folder first
+        d_model_dir = Path("D:/Makemoney/models/valtec_zeroshot/zeroshot")
+        if (d_model_dir / "config.json").exists() and list(d_model_dir.glob("G_*.pth")):
+            return str(d_model_dir)
+
         # First check if pretrained/zeroshot exists locally (dev mode)
         package_root = Path(__file__).parent.parent
         local_dir = package_root / "pretrained" / "zeroshot"
