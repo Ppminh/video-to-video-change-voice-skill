@@ -87,7 +87,10 @@ def label(base: str, variant: str) -> str:
 
 def _pools(s: dict, tts_mode: str, genre: str, available: dict) -> dict:
     if tts_mode == "nano":
-        pools = s["nano_voices"]
+        pools = s.get("nano_voices", {})
+    elif tts_mode == "valtec":
+        pools = s.get("valtec_voices") or {"male": ["Valtec SM", "Valtec NM1", "Valtec NM2"],
+                                            "female": ["Valtec SF", "Valtec NF"]}
     else:
         gv = s["genre_voices"]
         pools = gv.get(genre) or gv["default"]

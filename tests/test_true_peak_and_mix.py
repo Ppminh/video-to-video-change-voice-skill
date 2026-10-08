@@ -185,6 +185,7 @@ class TestFullMixStepPipeline(unittest.TestCase):
             shutil.copytree(source_dir / "tts", test_dir / "tts", dirs_exist_ok=True)
 
             job = Job(test_dir)
+            job.settings = {**job.settings, "workflow_mode": "dub"}
             t0 = time.time()
             run_mix(job)
             mix_time = time.time() - t0

@@ -25,6 +25,7 @@ ENV_PATH = CONFIG / ".env"
 HF_CACHE = Path("D:/Makemoney/.cache/huggingface") if Path("D:/Makemoney").exists() else Path.home() / ".cache" / "huggingface"
 os.environ.setdefault("HF_HOME", str(HF_CACHE))
 os.environ.setdefault("HF_HUB_CACHE", str(HF_CACHE / "hub"))
+VALTEC_MODEL_DIR = Path("D:/Makemoney/models/valtec_tts") if Path("D:/Makemoney/models/valtec_tts").exists() else MODELS / "valtec_tts"
 
 IS_MAC = sys.platform == "darwin"
 
@@ -96,6 +97,9 @@ DEFAULT_SETTINGS = {
     # VieNeu Nano chỉ có 2 giọng miền Nam
     "nano_voices": {"male": ["Adam", "Đức Trí", "Hữu Quân", "Minh Quân"],
                     "female": ["Ái Hân", "Mỹ Duyên", "Trúc Ly", "Xuân Tiên"]},
+    # Valtec TTS (v-tts) gồm 5 giọng Bắc và Nam
+    "valtec_voices": {"male": ["Valtec SM", "Valtec NM1", "Valtec NM2"],
+                      "female": ["Valtec SF", "Valtec NF"]},
 }
 
 

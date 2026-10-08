@@ -189,11 +189,17 @@ class Job:
 
     @property
     def settings(self) -> dict:
+        if hasattr(self, "_settings_override") and self._settings_override is not None:
+            return self._settings_override
         s = paths.load_settings()
         info = self.read("job.json", {}) or {}
         if info.get("mode"):
             s["workflow_mode"] = info["mode"]
         return s
+
+    @settings.setter
+    def settings(self, val: dict) -> None:
+        self._settings_override = val
 
 
 def threads() -> int:

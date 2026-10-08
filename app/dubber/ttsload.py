@@ -313,9 +313,94 @@ class EdgeTTSWrapper:
         return [(name, name) for name in self._preset_voices]
 
 
+class ValtecTTSWrapper:
+    """Wrapper cho Valtec TTS (v-tts): mô hình 74.8M siêu nhẹ, chạy hoàn toàn offline trên CPU, 5 giọng Bắc và Nam."""
+    def __init__(self, model_dir: Path | str | None = None, device: str = "cpu"):
+        import sys
+        from . import paths
+        # Bổ sung site-packages và vendor path
+        site_pkg = Path("D:/Makemoney/site-packages")
+        if site_pkg.exists() and str(site_pkg) not in sys.path:
+            sys.path.insert(0, str(site_pkg))
+
+        vendor_dir = paths.APP_DIR / "dubber" / "vendor" / "v_tts"
+        if str(vendor_dir) not in sys.path:
+            sys.path.insert(0, str(vendor_dir))
+
+        if model_dir is None:
+            model_dir = paths.VALTEC_MODEL_DIR
+        self.model_dir = Path(model_dir)
+
+        from v_tts import TTS
+        self.tts = TTS(model_path=str(self.model_dir), device=device)
+        self.sample_rate = 24000
+        self._preset_voices = {
+            "Valtec SF": {"gender": "female", "speaker": "SF"},
+            "Valtec SM": {"gender": "male", "speaker": "SM"},
+            "Valtec NF": {"gender": "female", "speaker": "NF"},
+            "Valtec NM1": {"gender": "male", "speaker": "NM1"},
+            "Valtec NM2": {"gender": "male", "speaker": "NM2"},
+            # Tương thích với các tên giọng phổ biến trong casting
+            "Thục Đoan": {"gender": "female", "speaker": "SF"},
+            "Mỹ Duyên": {"gender": "female", "speaker": "SF"},
+            "Kim Thanh": {"gender": "female", "speaker": "NF"},
+            "Thùy Dung": {"gender": "female", "speaker": "NF"},
+            "Hoài My": {"gender": "female", "speaker": "SF"},
+            "Thái Sơn": {"gender": "male", "speaker": "SM"},
+            "Minh Triết": {"gender": "male", "speaker": "SM"},
+            "Đức Trí": {"gender": "male", "speaker": "NM1"},
+            "Adam": {"gender": "male", "speaker": "NM2"},
+            "Nam Minh": {"gender": "male", "speaker": "SM"},
+        }
+
+    def infer(self, text: str, voice: str | None = None, speed: float = 1.0, **kwargs):
+        import numpy as np
+        clean_txt = (text or "").strip()
+        if not clean_txt or not any(c.isalnum() for c in clean_txt):
+            return np.zeros(int(self.sample_rate * 0.4), dtype=np.float32)
+
+        info = self._preset_voices.get(voice)
+        if not info and voice:
+            import re
+            clean = re.sub(r"\s*\(.*?\)", "", str(voice)).strip()
+            info = self._preset_voices.get(clean)
+        if not info and voice:
+            v_low = str(voice).lower()
+            if "sf" in v_low:
+                info = self._preset_voices["Valtec SF"]
+            elif "sm" in v_low:
+                info = self._preset_voices["Valtec SM"]
+            elif "nf" in v_low:
+                info = self._preset_voices["Valtec NF"]
+            elif "nm1" in v_low:
+                info = self._preset_voices["Valtec NM1"]
+            elif "nm2" in v_low:
+                info = self._preset_voices["Valtec NM2"]
+            elif any(m in v_low for m in ("male", "nam")):
+                info = self._preset_voices["Valtec SM"]
+            elif any(f in v_low for f in ("female", "nu", "nữ")):
+                info = self._preset_voices["Valtec SF"]
+
+        speaker = info.get("speaker", "SF") if info else "SF"
+        # length_scale trong VITS: < 1.0 = nói nhanh hơn, > 1.0 = nói chậm hơn
+        length_scale = 1.0 / max(0.5, min(2.0, float(speed))) if speed else 1.0
+
+        audio, sr = self.tts.synthesize(clean_txt, speaker=speaker, speed=length_scale)
+        if audio is None or len(audio) == 0:
+            return np.zeros(int(self.sample_rate * 0.4), dtype=np.float32)
+        if audio.dtype != np.float32:
+            audio = audio.astype(np.float32)
+        return audio
+
+    def list_preset_voices(self):
+        return [(name, name) for name in self._preset_voices]
+
+
 def load(mode: str = "edgetts", threads: int = 4, precision: str = "fp32", **kwargs):
     if mode == "edgetts":
         return EdgeTTSWrapper()
+    if mode == "valtec":
+        return ValtecTTSWrapper(model_dir=kwargs.get("valtec_model_dir"))
     if mode == "voxcpm":
         model_id = kwargs.get("voxcpm_model", "openbmb/VoxCPM2")
         timesteps = int(kwargs.get("voxcpm_timesteps", 10))
