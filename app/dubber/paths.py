@@ -77,8 +77,8 @@ DEFAULT_SETTINGS = {
     # Tự động cân bằng cao độ F0 trung bình khớp với nhân vật gốc
     "pitch_match": True,
     # giọng chính: nữ chính luôn dùng giọng này (để trống = theo thể loại)
-    "lead_female_voice": "Thục Đoan",
-    "lead_male_voice": "",
+    "lead_female_voice": "Hoài My",
+    "lead_male_voice": "Nam Minh",
     # tạo thêm biến thể giọng (trẻ/trầm/già/bé) để mỗi nhân vật một giọng riêng
     "voice_variants": True,
     # fp32 = chất lượng tối đa; int8 = nhanh hơn (nghe thử bằng 4_CHAN_DOAN trước khi đổi)

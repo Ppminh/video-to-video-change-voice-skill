@@ -18,19 +18,24 @@ from pathlib import Path
 
 import numpy as np
 
-# ---------------------------------------------------------------- Tham số chuẩn cho các giọng đọc
+# ---------------------------------------------------------------- Tham số chuẩn cho các giọng đọc (Edge-TTS & VieNeu)
 VOICE_PROFILES = {
-    "Nam Minh": {"gender": "male", "baseline_f0": 125.0, "voice_id": "vi-VN-NamMinhNeural", "offset_hz": 0},
-    "Thái Sơn": {"gender": "male", "baseline_f0": 125.0, "voice_id": "vi-VN-NamMinhNeural", "offset_hz": -2},
-    "Minh Triết": {"gender": "male", "baseline_f0": 130.0, "voice_id": "vi-VN-NamMinhNeural", "offset_hz": 2},
-    "Đức Trí": {"gender": "male", "baseline_f0": 120.0, "voice_id": "vi-VN-NamMinhNeural", "offset_hz": -4},
-    "Adam": {"gender": "male", "baseline_f0": 125.0, "voice_id": "vi-VN-NamMinhNeural", "offset_hz": 0},
-    "Hoài My": {"gender": "female", "baseline_f0": 215.0, "voice_id": "vi-VN-HoaiMyNeural", "offset_hz": 0},
-    "Thục Đoan": {"gender": "female", "baseline_f0": 220.0, "voice_id": "vi-VN-HoaiMyNeural", "offset_hz": 2},
-    "Mỹ Duyên": {"gender": "female", "baseline_f0": 225.0, "voice_id": "vi-VN-HoaiMyNeural", "offset_hz": 4},
-    "Kim Thanh": {"gender": "female", "baseline_f0": 210.0, "voice_id": "vi-VN-HoaiMyNeural", "offset_hz": -2},
-    "Thùy Dung": {"gender": "female", "baseline_f0": 220.0, "voice_id": "vi-VN-HoaiMyNeural", "offset_hz": 1},
+    # Microsoft Edge-TTS: Giữ vai trò chủ đạo cho các nhân vật chính
+    "Nam Minh": {"gender": "male", "engine": "Edge-TTS", "baseline_f0": 125.0, "voice_id": "vi-VN-NamMinhNeural", "offset_hz": 0, "role": "lead_male"},
+    "Hoài My": {"gender": "female", "engine": "Edge-TTS", "baseline_f0": 215.0, "voice_id": "vi-VN-HoaiMyNeural", "offset_hz": 0, "role": "lead_female"},
+
+    # Kho giọng VieNeu miền Nam: Tự động bổ sung khi video có nhiều nhân vật phụ (3, 4, 5+ người nói)
+    "Đức Trí": {"gender": "male", "engine": "VieNeu", "baseline_f0": 115.0, "voice_id": "vi-VN-NamMinhNeural", "offset_hz": -4, "timbre": "nam trầm"},
+    "Thái Sơn": {"gender": "male", "engine": "VieNeu", "baseline_f0": 125.0, "voice_id": "vi-VN-NamMinhNeural", "offset_hz": -2, "timbre": "nam trung trầm"},
+    "Adam": {"gender": "male", "engine": "VieNeu", "baseline_f0": 128.0, "voice_id": "vi-VN-NamMinhNeural", "offset_hz": 0, "timbre": "nam trung"},
+    "Minh Triết": {"gender": "male", "engine": "VieNeu", "baseline_f0": 140.0, "voice_id": "vi-VN-NamMinhNeural", "offset_hz": 2, "timbre": "nam thanh"},
+
+    "Kim Thanh": {"gender": "female", "engine": "VieNeu", "baseline_f0": 210.0, "voice_id": "vi-VN-HoaiMyNeural", "offset_hz": -2, "timbre": "nữ trầm"},
+    "Thục Đoan": {"gender": "female", "engine": "VieNeu", "baseline_f0": 220.0, "voice_id": "vi-VN-HoaiMyNeural", "offset_hz": 2, "timbre": "nữ ấm truyền cảm"},
+    "Thùy Dung": {"gender": "female", "engine": "VieNeu", "baseline_f0": 225.0, "voice_id": "vi-VN-HoaiMyNeural", "offset_hz": 1, "timbre": "nữ trung"},
+    "Mỹ Duyên": {"gender": "female", "engine": "VieNeu", "baseline_f0": 235.0, "voice_id": "vi-VN-HoaiMyNeural", "offset_hz": 4, "timbre": "nữ thanh cao"},
 }
+
 
 
 def get_voice_profile(voice_name_or_id: str | None) -> dict:
@@ -91,15 +96,16 @@ def _safe_float(val: any, default: float = 0.0) -> float:
         return default
 
 
-def classify_voice_tone(f0: float, rms: float, avg_rms: float = 0.08, max_rms: float = 0.25) -> str:
+def classify_voice_tone(f0: float, rms: float, avg_rms: float = 0.08, max_rms: float = 0.25, gender: str = "auto") -> str:
     """Phân loại đặc trưng tông giọng theo yêu cầu R1:
     - trầm nam (F0 thấp < 130Hz)
     - trung (130–180Hz)
     - thanh cao nữ/trẻ nhỏ (> 200Hz)
     - hét lớn/cao trào (F0 cao kết hợp năng lượng RMS lớn)
+    - lọc nhiễu âm ngoài dải tần số giọng người
     """
-    if f0 <= 0 and rms < 0.01:
-        return "không xác định"
+    if f0 <= 0:
+        return "thầm thì/không rõ âm vực" if rms >= 0.01 else "không xác định"
 
     # Kiểm tra hét lớn / cao trào (cần cả cao độ dâng cao và năng lượng mạnh)
     is_climax = (
@@ -110,16 +116,27 @@ def classify_voice_tone(f0: float, rms: float, avg_rms: float = 0.08, max_rms: f
     if is_climax:
         return "hét lớn/cao trào"
 
-    if 0 < f0 < 130:
-        return "trầm nam"
-    elif 130 <= f0 <= 180:
-        return "trung"
-    elif f0 > 200:
-        return "thanh cao nữ/trẻ nhỏ"
-    elif 180 < f0 <= 200:
-        return "trung"
+    g_low = str(gender).lower()
+    is_male = g_low in ("male", "nam") or (g_low == "auto" and f0 < 190.0)
+
+    if is_male:
+        if 0 < f0 < 130:
+            return "trầm nam"
+        elif 130 <= f0 <= 180:
+            return "trung"
+        elif 180 < f0 <= 260:
+            return "trung"
+        else:
+            return "trung" if rms <= 0.14 else "hét lớn/cao trào"
     else:
-        return "không xác định"
+        if 0 < f0 < 130:
+            return "nữ trầm"
+        elif 130 <= f0 <= 200:
+            return "trung"
+        elif f0 > 200:
+            return "thanh cao nữ/trẻ nhỏ"
+        else:
+            return "trung"
 
 
 def analyze_segment_pitch_energy(samples: np.ndarray, sr: int, fmin: float = 60.0, fmax: float = 650.0) -> dict:
@@ -341,7 +358,8 @@ def analyze_transcript_f0(vocals_path: str | Path | None, lines: list[dict],
         st = max(0.0, _safe_float(ln.get("start"), 0.0))
         en = max(st, _safe_float(ln.get("end"), st + 1.0))
         st, en = min(st, en), max(st, en)
-        spk = str(ln.get("spk") or "S0")
+        spk_raw = ln.get("spk")
+        spk = str(spk_raw) if spk_raw is not None else "S0"
         zh = str(ln.get("zh") or "")
         dur = max(0.1, en - st)
 
@@ -403,6 +421,126 @@ def analyze_transcript_f0(vocals_path: str | Path | None, lines: list[dict],
     return profiles
 
 
+def extract_speaker_f0_profiles(vocals_path: str | Path | None, lines: list[dict],
+                                speakers: dict | None = None,
+                                precomputed_profiles: dict | None = None) -> dict[str, dict]:
+    """Phân tích cao độ trung bình (F0 median) và năng lượng giọng nói của từng người nói từ vocals.wav:
+    - Nam trầm: ~110Hz (< 130Hz)
+    - Nam thanh: ~140-160Hz
+    - Nữ thanh cao: ~220-250Hz (> 200Hz)
+    - Nữ trầm / ấm: ~205-215Hz
+    """
+    profiles = precomputed_profiles if precomputed_profiles is not None else analyze_transcript_f0(vocals_path, lines, speakers)
+    spk_data: dict[str, dict] = {}
+
+    spk_f0_samples: dict[str, list[float]] = {}
+    spk_rms_samples: dict[str, list[float]] = {}
+    spk_dur: dict[str, float] = {}
+    spk_lines: dict[str, int] = {}
+
+    for lid, p in profiles.items():
+        spk_raw = p.get("spk")
+        spk = str(spk_raw) if spk_raw is not None else "S0"
+        f0 = _safe_float(p.get("f0") or p.get("f0_fallback"), 0.0)
+        rms = _safe_float(p.get("rms"), 0.0)
+        dur = _safe_float(p.get("duration"), 0.0)
+        if f0 > 0:
+            spk_f0_samples.setdefault(spk, []).append(f0)
+        if rms > 0:
+            spk_rms_samples.setdefault(spk, []).append(rms)
+        spk_dur[spk] = spk_dur.get(spk, 0.0) + dur
+        spk_lines[spk] = spk_lines.get(spk, 0) + 1
+
+    all_speakers = set(spk_dur.keys())
+    if speakers and isinstance(speakers, dict):
+        all_speakers.update(str(k) for k in speakers.keys())
+
+    for spk in all_speakers:
+        f0_list = spk_f0_samples.get(spk, [])
+        spk_meta = (speakers or {}).get(spk)
+        if not spk_meta and (speakers or {}):
+            spk_meta = (speakers or {}).get(int(spk)) if str(spk).isdigit() else None
+        spk_meta = spk_meta or {}
+        med_f0 = float(np.median(f0_list)) if f0_list else _safe_float(spk_meta.get("f0"), 0.0)
+
+        spk_gender = spk_meta.get("gender") or spk_meta.get("gender_voice") or "auto"
+        rms_list = spk_rms_samples.get(spk, [])
+        mean_rms = float(np.mean(rms_list)) if rms_list else 0.08
+        tone = classify_voice_tone(med_f0, mean_rms, gender=spk_gender)
+
+        spk_data[spk] = {
+            "f0_median": round(med_f0, 1),
+            "rms": round(mean_rms, 4),
+            "tone": tone,
+            "talk_time": round(spk_dur.get(spk, 0.0), 2),
+            "line_count": spk_lines.get(spk, 0),
+        }
+
+    return spk_data
+
+
+def pair_voice_by_acoustic_distance(spk_f0: float, gender: str = "male",
+                                   candidate_voices: list[str] | None = None,
+                                   engine_preference: str | None = None) -> str:
+    """Gán giọng tương thích nhất (Acoustic Distance Pairing):
+    Lựa chọn giọng lồng tiếng có cao độ và màu giọng gần với diễn viên gốc nhất:
+    - Nhân vật có tông giọng trầm trong video gốc (~110Hz) -> ghép với giọng nam trầm tương ứng (Đức Trí ~115Hz).
+    - Nhân vật nam thanh (~150-160Hz) -> ghép với giọng nam thanh tương ứng (Minh Triết ~140Hz).
+    - Nhân vật nữ cao (> 220Hz, ví dụ ~235-250Hz) -> ghép với giọng nữ thanh tương ứng (Mỹ Duyên ~235Hz).
+    - Nhân vật nữ trầm/ấm (~205-215Hz) -> ghép với giọng nữ trầm tương ứng (Kim Thanh ~210Hz / Hoài My ~215Hz).
+    - Tự động lọc hài âm (octave doubling/tripling) và nhiễu ngoài dải tần tự nhiên.
+    """
+    g = "female" if str(gender).lower() in ("female", "nu", "nữ", "child") else "male"
+    if candidate_voices:
+        pool = [v for v in candidate_voices if v]
+    else:
+        pool = [name for name, prof in VOICE_PROFILES.items() if prof.get("gender") == g]
+
+    if not pool:
+        return "Hoài My" if g == "female" else "Nam Minh"
+
+    if engine_preference:
+        eng_pool = [v for v in pool if get_voice_profile(v).get("engine") == engine_preference]
+        if eng_pool:
+            pool = eng_pool
+
+    f0_val = _safe_float(spk_f0, 0.0)
+    if g == "male":
+        # Nam giới: dải tần số cơ bản tự nhiên của giọng nói: 65Hz - 260Hz
+        if 65.0 <= f0_val <= 260.0:
+            target_f0 = f0_val
+        elif 260.0 < f0_val <= 520.0 and (65.0 <= f0_val / 2.0 <= 260.0):
+            # Nhảy quãng tám (octave doubling error) ở hài âm 2: gập đôi về tần số cơ bản
+            target_f0 = f0_val / 2.0
+        elif 520.0 < f0_val <= 780.0 and (65.0 <= f0_val / 3.0 <= 260.0):
+            # Hài âm bậc 3 (tiếng còi xe ~700Hz hoặc mép trên): gập về tần số gốc
+            target_f0 = f0_val / 3.0
+        elif 50.0 <= f0_val < 65.0:
+            target_f0 = 115.0  # Nam rất trầm (bass sâu) -> ghép Đức Trí
+        else:
+            # Nhiễu ngoài dải tần người nói: dùng baseline chuẩn nam
+            target_f0 = 125.0
+    else:
+        # Nữ giới / trẻ em: dải tần số cơ bản tự nhiên: 120Hz - 380Hz
+        if 120.0 <= f0_val <= 380.0:
+            target_f0 = f0_val
+        elif 380.0 < f0_val <= 760.0 and (120.0 <= f0_val / 2.0 <= 380.0):
+            # Nhảy quãng tám ở giọng nữ cao
+            target_f0 = f0_val / 2.0
+        elif 80.0 <= f0_val < 120.0:
+            target_f0 = 210.0  # Nữ trầm -> ghép Kim Thanh
+        else:
+            # Nhiễu ngoài dải tần: dùng baseline chuẩn nữ
+            target_f0 = 220.0
+
+    def _dist(v_name: str) -> float:
+        prof = get_voice_profile(v_name)
+        base_f0 = float(prof.get("baseline_f0", 220.0 if g == "female" else 125.0))
+        return abs(base_f0 - target_f0)
+
+    return min(pool, key=_dist)
+
+
 def map_pitch_to_prosody(line_pitch: dict, voice_name: str | None = None,
                          base_voice: str | None = None, emotion: str = "",
                          unit: str = "hz", safe_volume: bool = False,
@@ -413,6 +551,7 @@ def map_pitch_to_prosody(line_pitch: dict, voice_name: str | None = None,
     - Nhân vật gốc giọng trầm (<130Hz) -> tự động hạ pitch (-8% tới -12Hz) cho giọng trầm ấm.
     - Nhân vật giọng cao (>200Hz) / trẻ nhỏ -> tự động tăng pitch (+10% tới +18Hz) cho giọng trong trẻo.
     - Phân đoạn kịch tính/gắt giọng -> tự động tăng pitch (+15Hz) và volume (giới hạn an toàn <= +4% khi safe_volume=True).
+    - Khử nhiễu còi xe / rít cao tần, gập hài âm để không bị méo tiếng quá mức.
     """
     v_key = base_voice or voice_name or "Hoài My"
     v_info = get_voice_profile(v_key)
@@ -438,47 +577,70 @@ def map_pitch_to_prosody(line_pitch: dict, voice_name: str | None = None,
 
     f0 = _safe_float(line_pitch.get("f0") or line_pitch.get("f0_fallback"), 0.0)
     rms = _safe_float(line_pitch.get("rms"), 0.08)
-    tone = line_pitch.get("tone") or (classify_voice_tone(f0, rms) if f0 > 0 else "trung")
+    tone = line_pitch.get("tone") or (classify_voice_tone(f0, rms, gender=target_gender) if f0 > 0 else "trung")
     cjk_speed = _safe_float(line_pitch.get("cjk_speed"), 3.8)
 
     # 1. Tính toán bù trừ Pitch
     pitch_hz_delta = 0
     pitch_pct_delta = 0
 
+    eff_f0 = f0
+    eff_tone = tone
+
     if f0 > 0:
-        delta = f0 - target_baseline
-        if tone == "trầm nam" or f0 < 130:
+        if target_gender == "male":
+            if eff_f0 > 260.0:
+                if 65.0 <= eff_f0 / 2.0 <= 260.0:
+                    eff_f0 = eff_f0 / 2.0
+                elif 65.0 <= eff_f0 / 3.0 <= 260.0:
+                    eff_f0 = eff_f0 / 3.0
+                else:
+                    eff_f0 = target_baseline
+            if eff_tone == "thanh cao nữ/trẻ nhỏ":
+                eff_tone = "trung"
+        else:
+            if eff_f0 > 380.0:
+                if 120.0 <= eff_f0 / 2.0 <= 380.0:
+                    eff_f0 = eff_f0 / 2.0
+                else:
+                    eff_f0 = target_baseline
+
+        delta = eff_f0 - target_baseline
+        if eff_tone == "trầm nam" or eff_f0 < 130:
             # Nhân vật gốc trầm -> hạ pitch trầm ấm (-8% tới -12Hz, tối đa -22Hz)
             # Bảo đảm luôn hạ âm (delta âm), không bao giờ tăng pitch dù baseline thấp
             eff_delta = min(delta, -8.0)
             pitch_hz_delta = min(-4, max(-22, round(eff_delta * 0.44)))
             pitch_pct_delta = min(-3, max(-15, round((eff_delta / target_baseline) * 100 * 0.40)))
-        elif tone == "hét lớn/cao trào":
+        elif eff_tone == "hét lớn/cao trào":
             # Hét lớn / kịch tính -> tăng cao độ rõ rệt (+12Hz tới +28Hz)
             pitch_hz_delta = min(28, max(12, round(max(delta, 15.0) * 0.32) + 6))
             pitch_pct_delta = min(22, max(10, round((max(delta, 15.0) / target_baseline) * 100 * 0.30) + 5))
-        elif tone == "thanh cao nữ/trẻ nhỏ" or f0 > 200:
+        elif eff_tone == "thanh cao nữ/trẻ nhỏ" or (target_gender == "female" and eff_f0 > 200):
             # Giọng thanh cao / trẻ em -> nâng pitch trong trẻo (+10% tới +15Hz, tối đa +25Hz)
             # Bảo đảm luôn tăng âm (delta dương), không bao giờ hạ pitch khi Hoài My baseline cao
             eff_delta = max(delta, 12.0)
             pitch_hz_delta = max(4, min(25, round(eff_delta * 0.36)))
             pitch_pct_delta = max(3, min(18, round((eff_delta / target_baseline) * 100 * 0.34)))
         else:
-            # Tông trung -> bù trừ nhẹ nhàng theo độ lệch thực tế
-            pitch_hz_delta = round(delta * 0.30)
-            pitch_pct_delta = round((delta / target_baseline) * 100 * 0.30)
+            # Tông trung -> bù trừ nhẹ nhàng theo độ lệch thực tế, kiểm soát trần an toàn theo giới tính
+            scale = 0.20 if target_gender == "male" else 0.30
+            max_mid_hz = 14 if target_gender == "male" else 22
+            min_mid_hz = -14 if target_gender == "male" else -18
+            pitch_hz_delta = int(np.clip(round(delta * scale), min_mid_hz, max_mid_hz))
+            pitch_pct_delta = int(np.clip(round((delta / target_baseline) * 100 * scale), -12, 16))
     else:
         # Không có F0 đo được: giữ nguyên 0
         pitch_hz_delta = 0
         pitch_pct_delta = 0
 
     # Cộng thêm preset offset của từng giọng và variant offset (để bảo toàn bản sắc nhân vật)
-    pitch_hz_delta += preset_offset + (variant_offset if f0 <= 0 else 0)
-    pitch_pct_delta += round((preset_offset + (variant_offset if f0 <= 0 else 0)) * 0.8)
+    pitch_hz_delta += preset_offset + variant_offset
+    pitch_pct_delta += round((preset_offset + variant_offset) * 0.8)
 
     # 2. Tính toán bù trừ Volume (theo năng lượng RMS)
     vol_pct = 0
-    if tone == "hét lớn/cao trào" or rms > 0.15:
+    if eff_tone == "hét lớn/cao trào" or rms > 0.15:
         vol_pct = min(25, max(12, int(round((rms - 0.10) * 120))))
     elif rms < 0.035 and rms > 0:
         vol_pct = -14
@@ -489,7 +651,7 @@ def map_pitch_to_prosody(line_pitch: dict, voice_name: str | None = None,
 
     # 3. Tính toán bù trừ Rate (theo nhịp điệu dồn dập cjk_speed)
     rate_pct = 0
-    if tone == "hét lớn/cao trào":
+    if eff_tone == "hét lớn/cao trào":
         rate_pct += 10
     elif cjk_speed >= 5.5:
         rate_pct += 12
@@ -532,10 +694,10 @@ def map_pitch_to_prosody(line_pitch: dict, voice_name: str | None = None,
     # Thanh cao nữ/trẻ nhỏ -> luôn tăng pitch dương (>= +2Hz, >= +2%) trừ khi đang buồn/thì thầm
     is_angry_or_panicked = any(w in emo for w in ("angry", "tuc", "gian", "phẫn", "gắt", "bực", "panicked", "sợ", "hoảng"))
     is_sad_or_whisper = any(w in emo for w in ("sad", "buon", "khoc", "đau", "bi thương", "whisper", "thi tham", "nói nhỏ"))
-    if (tone == "trầm nam" or (0 < f0 < 130)) and not is_angry_or_panicked:
+    if (eff_tone == "trầm nam" or (0 < eff_f0 < 130)) and not is_angry_or_panicked:
         pitch_hz_delta = min(-2, pitch_hz_delta)
         pitch_pct_delta = min(-2, pitch_pct_delta)
-    elif (tone == "thanh cao nữ/trẻ nhỏ" or f0 > 200) and not is_sad_or_whisper:
+    elif ((eff_tone == "thanh cao nữ/trẻ nhỏ" and target_gender == "female") or (target_gender == "female" and eff_f0 > 200)) and not is_sad_or_whisper:
         pitch_hz_delta = max(2, pitch_hz_delta)
         pitch_pct_delta = max(2, pitch_pct_delta)
 
@@ -557,10 +719,11 @@ def map_pitch_to_prosody(line_pitch: dict, voice_name: str | None = None,
         "pitch_pct": f"{final_pitch_pct:+d}%",
         "rate": rate_str,
         "volume": vol_str,
-        "tone": tone,
+        "tone": eff_tone,
         "voice_id": v_info["voice_id"],
         "baseline_f0": target_baseline,
         "f0": f0,
+        "eff_f0": eff_f0,
         "rms": rms,
     }
 

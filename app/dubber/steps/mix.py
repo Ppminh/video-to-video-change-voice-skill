@@ -66,6 +66,9 @@ def studio_true_peak_limiter(audio: np.ndarray, sr: int = SR,
     import scipy.signal
     import scipy.ndimage
 
+    if audio is None or len(audio) == 0:
+        return audio
+    audio = np.nan_to_num(audio, nan=0.0, posinf=0.0, neginf=0.0)
     orig_shape = audio.shape
     if audio.ndim == 1:
         x = audio[:, None]

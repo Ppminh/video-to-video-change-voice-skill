@@ -141,7 +141,7 @@ class Worker:
                 if s.get("paused"):
                     self._idle(lane)
                     continue
-                parallel = bool(s.get("parallel_lanes", True))
+                parallel = bool(s.get("parallel_lanes", False))
                 if lane == "voice" and not parallel:
                     self._idle(lane)
                     continue
@@ -209,7 +209,7 @@ class Worker:
             env = dict(os.environ)
             env["PYTHONPATH"] = str(paths.APP_DIR)
             env["PYTHONUNBUFFERED"] = "1"
-            if background and paths.load_settings().get("parallel_lanes", True):
+            if background and paths.load_settings().get("parallel_lanes", False):
                 env["DUBBER_THREADS"] = "2"           # nhường CPU cho làn đọc giọng
             cmd = [sys.executable, "-m", "dubber.run_step", step, str(d)]
             if paths.IS_MAC or shutil.which("nice"):
@@ -242,10 +242,10 @@ class Worker:
                 err = (d / f"error_{step}.txt")
                 msg = err.read_text(encoding="utf-8") if err.exists() else f"Bước {step} lỗi (mã {rc})"
                 attempts = ((db.get(jid) or job).get("attempts") or 0) + 1
-                if step in RETRYABLE and attempts < 3:
+                if step in RETRYABLE and attempts <= 3:
                     backoff_sec = [5, 15, 30][min(attempts - 1, 2)]
                     db.update(jid, status="queued", attempts=attempts, error=msg[:1000],
-                              not_before=time.time() + backoff_sec, note=f"sẽ thử lại sau {backoff_sec}s (lần {attempts + 1}/3)")
+                              not_before=time.time() + backoff_sec, note=f"sẽ thử lại sau {backoff_sec}s (lần thử lại {attempts}/3)")
                 else:
                     db.update(jid, status="failed", attempts=attempts, error=msg[:1000], finished=time.time())
                 return

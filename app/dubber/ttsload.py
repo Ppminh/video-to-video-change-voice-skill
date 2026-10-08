@@ -298,12 +298,39 @@ class EdgeTTSWrapper:
         # Nếu cả 4 lần đều lỗi mạng: tự động fallback sang VieNeu dự phòng hoặc khoảng lặng êm
         try:
             if not hasattr(self, "_fallback_vieneu"):
-                from vieneu import Vieneu
-                self._fallback_vieneu = Vieneu(mode="v3turbo", threads=2)
+                materialize()
+                self._fallback_vieneu = _make("v3turbo", 2, "fp32")
             v_name = "Thục Đoan" if info.get("gender") == "female" else "Thái Sơn"
             arr = self._fallback_vieneu.infer(clean_txt, voice=v_name)
             if arr is not None and len(arr) > 0:
-                return np.asarray(arr, dtype=np.float32)
+                arr = np.atleast_1d(arr).astype(np.float32)
+                if arr.ndim > 1:
+                    arr = arr.mean(axis=-1 if arr.shape[-1] <= 2 else 0)
+                arr = arr.flatten()
+                v_sr = int(getattr(self._fallback_vieneu, "sample_rate", 48000) or 48000)
+                if v_sr != self.sample_rate:
+                    import scipy.signal
+                    if v_sr == 48000 and self.sample_rate == 24000:
+                        arr = scipy.signal.resample_poly(arr, 1, 2).astype(np.float32)
+                    else:
+                        num_s = int(len(arr) * self.sample_rate / v_sr)
+                        arr = scipy.signal.resample(arr, num_s).astype(np.float32)
+                return arr
+        except Exception:
+            pass
+
+        # Phương án dự phòng 2: Valtec TTS offline siêu nhẹ nếu có trên máy
+        try:
+            if not hasattr(self, "_fallback_valtec"):
+                from . import paths
+                if hasattr(paths, "VALTEC_MODEL_DIR") and paths.VALTEC_MODEL_DIR.exists():
+                    self._fallback_valtec = ValtecTTSWrapper(model_dir=paths.VALTEC_MODEL_DIR)
+                else:
+                    self._fallback_valtec = None
+            if self._fallback_valtec is not None:
+                arr = self._fallback_valtec.infer(clean_txt, voice=voice)
+                if arr is not None and len(arr) > 0:
+                    return np.asarray(arr, dtype=np.float32).flatten()
         except Exception:
             pass
 
@@ -455,8 +482,118 @@ class ValtecZeroShotWrapper:
         return [(name, name) for name in self._preset_voices]
 
 
+class HybridTTSWrapper(EdgeTTSWrapper):
+    """Bộ điều phối giọng đọc lai ghép (Hybrid Multi-Engine Voice Casting):
+    - Edge-TTS: Giữ vai trò chủ đạo cho các nhân vật chính (Hoài My, Nam Minh), siêu truyền cảm, tự nhiên, đa cảm xúc.
+    - VieNeu: Tự động mở rộng sang kho giọng miền Nam của VieNeu (Thục Đoan, Mỹ Duyên, Kim Thanh, Thùy Dung, Thái Sơn, Minh Triết, Đức Trí, Adam)
+      khi video có nhiều nhân vật phụ (3, 4, 5+ người nói).
+    - Thống nhất sample rate 24000Hz (VieNeu 48kHz tự động resample mượt mà sang 24kHz bằng scipy.signal.resample_poly).
+    - Bộ nhớ cực nhẹ (< 500MB RAM, không bao giờ vượt ngưỡng 4GB).
+    """
+    def __init__(self, threads: int = 4, precision: str = "fp32", **kwargs):
+        super().__init__()
+        self.threads = threads
+        self.precision = precision
+        self.sample_rate = 24000
+        self._vieneu = None
+        self._preset_voices = {
+            # Edge-TTS (Chủ đạo nhân vật chính)
+            "Hoài My": {"gender": "female", "engine": "Edge-TTS", "voice_id": "vi-VN-HoaiMyNeural", "pitch": "+0Hz", "baseline_f0": 215.0},
+            "Nam Minh": {"gender": "male", "engine": "Edge-TTS", "voice_id": "vi-VN-NamMinhNeural", "pitch": "+0Hz", "baseline_f0": 125.0},
+
+            # VieNeu v3 Turbo (Kho giọng miền Nam mở rộng cho nhân vật phụ)
+            "Đức Trí": {"gender": "male", "engine": "VieNeu", "baseline_f0": 115.0, "timbre": "nam trầm", "voice_id": "vi-VN-NamMinhNeural", "pitch": "-4Hz"},
+            "Thái Sơn": {"gender": "male", "engine": "VieNeu", "baseline_f0": 125.0, "timbre": "nam trung trầm", "voice_id": "vi-VN-NamMinhNeural", "pitch": "-2Hz"},
+            "Adam": {"gender": "male", "engine": "VieNeu", "baseline_f0": 128.0, "timbre": "nam trung", "voice_id": "vi-VN-NamMinhNeural", "pitch": "+0Hz"},
+            "Minh Triết": {"gender": "male", "engine": "VieNeu", "baseline_f0": 140.0, "timbre": "nam thanh", "voice_id": "vi-VN-NamMinhNeural", "pitch": "+2Hz"},
+
+            "Kim Thanh": {"gender": "female", "engine": "VieNeu", "baseline_f0": 210.0, "timbre": "nữ trầm", "voice_id": "vi-VN-HoaiMyNeural", "pitch": "-2Hz"},
+            "Thục Đoan": {"gender": "female", "engine": "VieNeu", "baseline_f0": 220.0, "timbre": "nữ ấm truyền cảm", "voice_id": "vi-VN-HoaiMyNeural", "pitch": "+2Hz"},
+            "Thùy Dung": {"gender": "female", "engine": "VieNeu", "baseline_f0": 225.0, "timbre": "nữ trung", "voice_id": "vi-VN-HoaiMyNeural", "pitch": "+1Hz"},
+            "Mỹ Duyên": {"gender": "female", "engine": "VieNeu", "baseline_f0": 235.0, "timbre": "nữ thanh cao", "voice_id": "vi-VN-HoaiMyNeural", "pitch": "+4Hz"},
+        }
+
+    def _get_vieneu(self):
+        if self._vieneu is None:
+            if cached("turbo"):
+                materialize()
+                os.environ["HF_HUB_OFFLINE"] = "1"
+                try:
+                    self._vieneu = _make("v3turbo", self.threads, self.precision)
+                except Exception:
+                    os.environ.pop("HF_HUB_OFFLINE", None)
+                    self._vieneu = _make("v3turbo", self.threads, self.precision)
+            else:
+                self._vieneu = _make("v3turbo", self.threads, self.precision)
+        return self._vieneu
+
+    def infer(self, text: str, voice: str | None = None, engine: str | None = None, **kwargs):
+        import numpy as np
+        clean_txt = (text or "").strip()
+        if not clean_txt or not any(c.isalnum() for c in clean_txt):
+            return np.zeros(int(self.sample_rate * 0.4), dtype=np.float32)
+
+        import re
+        clean_v = re.sub(r"\s*\(.*?\)", "", str(voice or "")).strip()
+
+        # Xác định Engine
+        target_engine = engine
+        if not target_engine:
+            v_info = self._preset_voices.get(clean_v) or self._preset_voices.get(voice)
+            if v_info and v_info.get("engine"):
+                target_engine = v_info["engine"]
+            elif clean_v in ("Hoài My", "Nam Minh"):
+                target_engine = "Edge-TTS"
+            elif clean_v in ("Thục Đoan", "Mỹ Duyên", "Kim Thanh", "Thùy Dung", "Thái Sơn", "Minh Triết", "Đức Trí", "Adam"):
+                target_engine = "VieNeu"
+            else:
+                target_engine = "Edge-TTS"
+
+        if target_engine == "VieNeu":
+            try:
+                vn = self._get_vieneu()
+                v_info = self._preset_voices.get(clean_v) or self._preset_voices.get(voice) or {}
+                spk_gender = v_info.get("gender")
+                if not spk_gender:
+                    try:
+                        from .pitch import get_voice_profile
+                        spk_gender = get_voice_profile(clean_v).get("gender", "female")
+                    except Exception:
+                        spk_gender = "female"
+                default_vn = "Thái Sơn" if spk_gender == "male" else "Thục Đoan"
+                vn_v = clean_v if clean_v in ("Thục Đoan", "Mỹ Duyên", "Kim Thanh", "Thùy Dung", "Thái Sơn", "Minh Triết", "Đức Trí", "Adam") else default_vn
+                arr = vn.infer(clean_txt, voice=vn_v)
+                if arr is not None and len(arr) > 0:
+                    arr = np.atleast_1d(arr).astype(np.float32)
+                    arr = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
+                    if arr.ndim > 1:
+                        arr = arr.mean(axis=-1 if arr.shape[-1] <= 2 else 0)
+                    arr = arr.flatten()
+                    arr = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
+                    v_sr = int(getattr(vn, "sample_rate", 48000) or 48000)
+                    if v_sr != self.sample_rate:
+                        import scipy.signal
+                        if v_sr == 48000 and self.sample_rate == 24000:
+                            arr = scipy.signal.resample_poly(arr, 1, 2).astype(np.float32)
+                        else:
+                            num_s = int(len(arr) * self.sample_rate / v_sr)
+                            if num_s > 0:
+                                arr = scipy.signal.resample(arr, num_s).astype(np.float32)
+                            else:
+                                arr = np.zeros(0, dtype=np.float32)
+                    return np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
+            except Exception:
+                pass
+
+        # Mặc định Edge-TTS
+        return super().infer(text, voice=voice, **kwargs)
+
+
 def load(mode: str = "edgetts", threads: int = 4, precision: str = "fp32", **kwargs):
-    if mode == "edgetts":
+    clean_mode = str(mode or "").lower().replace("-", "").replace("_", "").strip()
+    if clean_mode in ("edgetts", "hybrid", "turbohybrid", "edge"):
+        return HybridTTSWrapper(threads=threads, precision=precision, **kwargs)
+    if clean_mode == "edgepure":
         return EdgeTTSWrapper()
     if mode == "valtec":
         return ValtecTTSWrapper(model_dir=kwargs.get("valtec_model_dir"))
