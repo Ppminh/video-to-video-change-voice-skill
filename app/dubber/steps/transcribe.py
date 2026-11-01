@@ -25,9 +25,9 @@ def _vad_segments(samples: np.ndarray) -> list[tuple[float, float]]:
     cfg = sherpa_onnx.VadModelConfig()
     cfg.silero_vad.model = str(models.ensure("vad"))
     cfg.silero_vad.threshold = 0.35
-    cfg.silero_vad.min_silence_duration = 0.3
+    cfg.silero_vad.min_silence_duration = 0.22
     cfg.silero_vad.min_speech_duration = 0.25
-    cfg.silero_vad.max_speech_duration = 9
+    cfg.silero_vad.max_speech_duration = 4.5
     cfg.sample_rate = SR
     try:
         cfg.num_threads = 1
@@ -117,6 +117,77 @@ def _clean(text: str) -> str:
     return t.strip()
 
 
+def _find_quiet_point(samples: np.ndarray, target_sec: float, min_sec: float, max_sec: float) -> float:
+    """Tìm điểm có năng lượng âm thanh (RMS) thấp nhất quanh mốc dự kiến (±0.25s) để cắt câu đúng nhịp nghỉ hơi."""
+    lo = max(min_sec + 0.35, target_sec - 0.25)
+    hi = min(max_sec - 0.35, target_sec + 0.25)
+    if hi <= lo:
+        return target_sec
+    win = int(0.03 * SR)
+    step = int(0.01 * SR)
+    s_idx = max(0, int(lo * SR))
+    e_idx = min(len(samples) - win, int(hi * SR))
+    if e_idx <= s_idx:
+        return target_sec
+    best_i = int(target_sec * SR)
+    best_e = float("inf")
+    for i in range(s_idx, e_idx, step):
+        seg = samples[i:i + win]
+        e = float(np.mean(seg * seg))
+        if e < best_e:
+            best_e = e
+            best_i = i + win // 2
+    return best_i / SR
+
+
+def _split_zh_clauses(st: float, en: float, text: str, samples: np.ndarray) -> list[tuple[float, float, str]]:
+    """Tách đoạn thoại tiếng Trung dài thành từng câu đơn ngắn gọn."""
+    dur = en - st
+    n_chars = max(1, cjk_count(text))
+    if dur < 2.2 and n_chars <= 13:
+        return [(st, en, text)]
+
+    # 1. Tách ưu tiên theo dấu kết thúc câu (。！？；)
+    raw_sents = [p.strip() for p in re.split(r"(?<=[。！？；!?])", text) if p.strip()]
+    parts = []
+    for s in raw_sents:
+        if cjk_count(s) > 13:
+            # Nếu 1 câu vẫn quá dài (>13 chữ Hán), tách tiếp ở dấu phẩy (，)
+            sub = [c.strip() for c in re.split(r"(?<=[，,、])", s) if c.strip()]
+            parts.extend(sub)
+        else:
+            parts.append(s)
+
+    # Gộp các mảnh quá ngắn (<3 chữ) vào câu liền kề để tránh câu cụt
+    merged = []
+    for p in parts:
+        if merged and (cjk_count(p) < 3 or cjk_count(merged[-1]) < 3):
+            merged[-1] += p
+        else:
+            merged.append(p)
+
+    if len(merged) <= 1:
+        return [(st, en, text)]
+
+    weights = [max(1, cjk_count(p)) for p in merged]
+    tot_w = sum(weights)
+    out = []
+    cur_st = st
+    acc_w = 0
+    for idx_p, (p, w) in enumerate(zip(merged, weights)):
+        acc_w += w
+        if idx_p == len(merged) - 1:
+            cur_en = en
+        else:
+            est_t = st + dur * (acc_w / tot_w)
+            cur_en = _find_quiet_point(samples, est_t, cur_st, en)
+            if cur_en - cur_st < 0.45:
+                cur_en = min(en - 0.35, cur_st + 0.45)
+        out.append((round(cur_st, 3), round(cur_en, 3), p))
+        cur_st = cur_en
+    return out
+
+
 def _pitch(samples: np.ndarray) -> float:
     try:
         from ..pitch import analyze_segment_pitch_energy
@@ -176,8 +247,10 @@ def run(job: Job) -> None:
         if cjk_count(text) == 0 and not re.search(r"[A-Za-z0-9]", text):
             nonspeech.append({"start": round(st, 3), "end": round(en, 3), "event": event})
             continue
-        lines.append({"start": round(st, 3), "end": round(en, 3), "spk": f"S{spk}" if spk >= 0 else "S?",
-                      "zh": text, "emotion": emotion, "event": event})
+        spk_label = f"S{spk}" if spk >= 0 else "S?"
+        for sub_st, sub_en, sub_txt in _split_zh_clauses(st, en, text, samples):
+            lines.append({"start": round(sub_st, 3), "end": round(sub_en, 3), "spk": spk_label,
+                          "zh": sub_txt, "emotion": emotion, "event": event})
 
     # gán người nói cho đoạn không xác định = người nói gần nhất
     for i, ln in enumerate(lines):

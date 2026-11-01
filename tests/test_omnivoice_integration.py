@@ -172,6 +172,27 @@ class TestOmniVoiceIntegration(unittest.TestCase):
             self.assertTrue((work / "tts" / "spk_refs" / "utt_0001.wav").exists())
             self.assertEqual(_MockColabHandler.last_payload["ref_text"], "今天天气真的非常好")
 
+    def test_short_sentence_subtitle_splitting(self):
+        from dubber.steps.render import _split_vi_into_short_cues
+        from dubber.steps.transcribe import _split_zh_clauses
+
+        # 1. Kiểm tra tách phụ đề tiếng Việt dài thành từng câu/vế ngắn (<= 8-9 chữ)
+        long_vi = "Hôm nay trời mưa rất to, nhưng anh ấy vẫn quyết định ra ngoài tìm cô ấy ngay lập tức."
+        cues = _split_vi_into_short_cues(1.0, 5.2, 6.5, long_vi, max_words=8)
+        self.assertGreaterEqual(len(cues), 3)
+        for st, en, txt in cues:
+            self.assertGreater(en, st)
+            self.assertLessEqual(len(txt.split()), 9)
+
+        # 2. Kiểm tra tách đoạn tiếng Trung dài thành từng câu ngắn theo dấu câu & khoảng lặng
+        samples = np.zeros(16000 * 6, dtype=np.float32)
+        zh_long = "今天天气真的非常好，我们一起去公园散步吧！你说好不好？"
+        zh_parts = _split_zh_clauses(0.0, 5.5, zh_long, samples)
+        self.assertEqual(len(zh_parts), 3)
+        self.assertEqual(zh_parts[0][2], "今天天气真的非常好，")
+        self.assertEqual(zh_parts[1][2], "我们一起去公园散步吧！")
+        self.assertEqual(zh_parts[2][2], "你说好不好？")
+
 
 if __name__ == "__main__":
     unittest.main()

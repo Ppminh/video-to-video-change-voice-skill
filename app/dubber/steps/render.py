@@ -7,13 +7,107 @@
 """
 from __future__ import annotations
 
+import re
 import time
 from datetime import date
 
 from PIL import Image, ImageDraw, ImageFont
 
 from .. import models, paths
-from ..utils import Job, ffmpeg, has_encoder, log, slugify
+from ..utils import Job, ffmpeg, has_encoder, log, slugify, vi_syllables
+
+_BREAK_CONNECTIVES = {
+    "nhưng", "vì", "nên", "mà", "thì", "khi", "nếu", "để", "hoặc",
+    "và", "rồi", "còn", "bởi", "dù", "tuy", "cho", "tại", "do",
+}
+
+
+def _split_long_phrase(phrase: str, max_words: int = 8) -> list[str]:
+    """Tách một vế câu dài (> max_words từ) thành các cụm ngắn tự nhiên theo từ nối hoặc chia đều."""
+    words = phrase.strip().split()
+    if len(words) <= max_words:
+        return [phrase.strip()] if phrase.strip() else []
+
+    out = []
+    while len(words) > max_words:
+        # Tìm từ nối tự nhiên trong khoảng từ chữ thứ 4 đến max_words
+        split_idx = None
+        for i in range(min(len(words) - 2, max_words), 3, -1):
+            w_clean = re.sub(r"[^\w]", "", words[i].lower())
+            if w_clean in _BREAK_CONNECTIVES:
+                split_idx = i
+                break
+        if split_idx is None:
+            # Chia cân đối làm các phần <= max_words
+            n_parts = (len(words) + max_words - 1) // max_words
+            split_idx = max(4, min(max_words, round(len(words) / n_parts)))
+        out.append(" ".join(words[:split_idx]))
+        words = words[split_idx:]
+    if words:
+        out.append(" ".join(words))
+    return out
+
+
+def _split_vi_into_short_cues(
+    st: float,
+    speech_dur: float,
+    max_en: float,
+    text: str,
+    max_words: int = 8,
+) -> list[tuple[float, float, str]]:
+    """Chia một câu/đoạn thoại tiếng Việt thành từng câu/vế phụ đề ngắn hiện nối tiếp nhau."""
+    clean = re.sub(r"\s+", " ", (text or "").strip())
+    if not clean:
+        return []
+
+    # 1. Tách theo các dấu ngắt câu và dấu phẩy (. ! ? ; : … — – ,)
+    raw_clauses = [
+        c.strip(" ,;:-–—")
+        for c in re.split(r"(?<=[.!?;:…—–])\s+|(?<=,)\s+", clean)
+        if c.strip(" ,;:-–—")
+    ]
+    if not raw_clauses:
+        raw_clauses = [clean]
+
+    # 2. Tách tiếp các vế vẫn còn dài (> max_words chữ)
+    chunks = []
+    for cl in raw_clauses:
+        chunks.extend(_split_long_phrase(cl, max_words=max_words))
+
+    # 3. Gộp các mảnh quá ngắn (1-2 chữ) vào vế liền kề nếu tổng số chữ vẫn gọn (<= max_words + 1)
+    merged = []
+    for ch in chunks:
+        w_cnt = len(ch.split())
+        if merged and (w_cnt <= 2 or len(merged[-1].split()) <= 2):
+            if len(merged[-1].split()) + w_cnt <= max_words + 1:
+                merged[-1] = f"{merged[-1]} {ch}"
+                continue
+        merged.append(ch)
+
+    if len(merged) <= 1:
+        en = min(max_en, st + max(0.35, speech_dur) + 0.18)
+        return [(round(st, 3), round(en, 3), merged[0] if merged else clean)]
+
+    # 4. Phân bổ thời gian hiển thị từng câu ngắn khớp tỷ lệ âm tiết trong khoảng giọng nói
+    total_speech = max(0.4, min(max_en - st, max(speech_dur, 0.35 * len(merged))))
+    weights = [max(1, vi_syllables(m)) for m in merged]
+    tot_w = sum(weights)
+
+    cues = []
+    cur_t = st
+    acc_w = 0
+    for idx_m, (m, w) in enumerate(zip(merged, weights)):
+        acc_w += w
+        if idx_m == len(merged) - 1:
+            nxt_t = min(max_en, st + total_speech + 0.18)
+        else:
+            nxt_t = st + total_speech * (acc_w / tot_w)
+        if nxt_t - cur_t < 0.22:
+            nxt_t = min(max_en, cur_t + 0.22)
+        if nxt_t > cur_t + 0.08:
+            cues.append((round(cur_t, 3), round(nxt_t, 3), m))
+            cur_t = nxt_t
+    return cues
 
 
 def _even(x):
@@ -112,18 +206,20 @@ def run(job: Job) -> None:
         center_y = H * 0.80
         bh = 0
 
-    # ---- ảnh phụ đề
+    # ---- ảnh phụ đề (Tự động chia thành từng câu/vế ngắn hiện nối tiếp nhau)
     cues = []
+    max_sub_words = int(s.get("sub_max_words", 8) or 8)
     lines = sorted(fit["lines"], key=lambda f: f["start"])
     for i, f in enumerate(lines):
         if not f["vi"]:
             continue
-        st = f["start"]
-        en = st + max(f["dur"], f["orig_end"] - st) + 0.25
+        st = float(f["start"])
+        speech_dur = max(float(f.get("dur") or 0.4), float(f.get("orig_end", st + 0.5)) - st)
+        max_en = st + speech_dur + 0.25
         if i + 1 < len(lines):
-            en = min(en, lines[i + 1]["start"])
-        if en - st > 0.2:
-            cues.append((st, en, f["vi"]))
+            max_en = min(max_en, float(lines[i + 1]["start"]))
+        if max_en - st > 0.18:
+            cues.extend(_split_vi_into_short_cues(st, speech_dur, max_en, f["vi"], max_words=max_sub_words))
     box_h = max([bh] + [_needed_h(c[2], W, fs0, font_path) for c in cues] + [int(fs0 * 2)])
     box_h = _even(min(box_h, H * 0.35))
     oy = _even(max(0, min(H - box_h, center_y - box_h / 2)))
