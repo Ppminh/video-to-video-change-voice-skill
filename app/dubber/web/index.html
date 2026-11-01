@@ -111,6 +111,7 @@
         <div class="row">
           <label class="hint" for="mode">Giọng đọc</label>
           <select id="mode">
+            <option value="omnivoice">🔥 OmniVoice (k2-fsa Sao chép Giọng &amp; Ngữ điệu Gốc - Google Colab T4)</option>
             <option value="edgetts">Microsoft Edge-TTS (Truyền cảm, Đa cảm xúc, Siêu tốc)</option>
             <option value="valtec_zeroshot">Valtec Zero-Shot (Sao chép màu giọng gốc diễn viên từ video)</option>
             <option value="valtec">Valtec TTS (Siêu nhẹ 75M, Offline CPU, Đa giọng Bắc/Nam)</option>
@@ -118,6 +119,24 @@
             <option value="nano">Nhanh (VieNeu Nano)</option>
             <option value="voxcpm">OpenBMB VoxCPM2 (AI Diffusion, Clone giọng)</option>
           </select>
+        </div>
+        <div id="omniBox" style="background:#0f172a;border:1px solid #334155;border-radius:10px;padding:10px 12px;margin-top:8px" hidden>
+          <div class="row" style="margin-top:0">
+            <label class="hint" for="omniModel">Bộ não OmniVoice</label>
+            <select id="omniModel">
+              <option value="k2-fsa/OmniVoice">k2-fsa/OmniVoice (Bản gốc 600+ ngôn ngữ - Clone Trung sang Việt mượt nhất)</option>
+              <option value="splendor1811/omnivoice-vietnamese">splendor1811/omnivoice-vietnamese (Tinh chỉnh chuyên sâu Tiếng Việt)</option>
+              <option value="kjanh/KhanhTTS-OmniVoice">kjanh/KhanhTTS-OmniVoice (Tinh chỉnh KhanhTTS Tiếng Việt)</option>
+            </select>
+          </div>
+          <div class="row" style="margin-top:8px">
+            <label class="hint" for="omniUrl">Link Colab T4</label>
+            <input type="text" id="omniUrl" placeholder="https://xxxx.trycloudflare.com (Để trống nếu đang chạy trực tiếp trên Colab)" style="flex:1;min-width:220px;background:#0d0f14;color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:6px 10px;font:inherit">
+            <button id="testOmniBtn" type="button">Kiểm tra kết nối</button>
+          </div>
+          <div id="omniStatus" class="hint" style="margin-top:6px;color:#93c5fd">
+            💡 Mở file <b>OmniVoice_Colab_T4.ipynb</b> trên Google Colab (chọn GPU T4) → Bấm Play để lấy link <code>trycloudflare.com</code> dán vào ô trên. Hệ thống sẽ tự động cắt giọng gốc diễn viên + câu chữ tiếng Trung để sao chép 100% màu giọng &amp; ngữ điệu sang tiếng Việt!
+          </div>
         </div>
         <div class="row">
           <label class="hint" for="leadF">Giọng nữ chính</label>
@@ -241,6 +260,14 @@ async function refresh() {
     }
 
     if (document.activeElement !== $("#mode")) $("#mode").value = s.settings.tts_mode || "turbo";
+    const isOmni = ($("#mode").value === "omnivoice");
+    if ($("#omniBox")) $("#omniBox").hidden = !isOmni;
+    if ($("#omniModel") && document.activeElement !== $("#omniModel")) {
+      $("#omniModel").value = s.settings.omnivoice_model || "k2-fsa/OmniVoice";
+    }
+    if ($("#omniUrl") && document.activeElement !== $("#omniUrl")) {
+      $("#omniUrl").value = s.settings.omnivoice_url || "";
+    }
     if (document.activeElement !== $("#leadF")) $("#leadF").value = s.settings.lead_female_voice ?? "Thục Đoan";
     if (document.activeElement !== $("#leadM")) $("#leadM").value = s.settings.lead_male_voice ?? "";
     $("#lanes").checked = s.settings.parallel_lanes === true;
@@ -306,7 +333,41 @@ $("#addBtn").onclick = async () => {
 };
 $("#pauseBtn").onclick = async () => { await api("/api/settings", { paused: !paused }); refresh(); };
 $("#openOut").onclick = () => api("/api/open", {});
-$("#mode").onchange = (e) => api("/api/settings", { tts_mode: e.target.value });
+$("#mode").onchange = async (e) => {
+  const val = e.target.value;
+  if ($("#omniBox")) $("#omniBox").hidden = (val !== "omnivoice");
+  await api("/api/settings", { tts_mode: val });
+};
+if ($("#omniModel")) {
+  $("#omniModel").onchange = (e) => api("/api/settings", { omnivoice_model: e.target.value });
+}
+if ($("#omniUrl")) {
+  $("#omniUrl").onchange = (e) => api("/api/settings", { omnivoice_url: e.target.value.trim() });
+}
+if ($("#testOmniBtn")) {
+  $("#testOmniBtn").onclick = async () => {
+    const url = ($("#omniUrl").value || "").trim();
+    const model = $("#omniModel") ? $("#omniModel").value : "k2-fsa/OmniVoice";
+    await api("/api/settings", { omnivoice_url: url, omnivoice_model: model });
+    $("#omniStatus").style.color = "var(--warn)";
+    $("#omniStatus").textContent = "⏳ Đang kiểm tra kết nối tới máy chủ OmniVoice (Colab T4)...";
+    try {
+      const res = await api("/api/test_omnivoice", { url });
+      if (res.ok) {
+        $("#omniStatus").style.color = "var(--ok)";
+        const dev = res.info?.device || res.mode || "GPU";
+        const mdl = res.info?.model || model;
+        $("#omniStatus").textContent = `✅ Đã kết nối thành công! Thiết bị: ${dev} · Mô hình: ${mdl}`;
+      } else {
+        $("#omniStatus").style.color = "var(--err)";
+        $("#omniStatus").textContent = `❌ Chưa kết nối được: ${res.error || "Kiểm tra lại link Cloudflare từ Colab"}`;
+      }
+    } catch (err) {
+      $("#omniStatus").style.color = "var(--err)";
+      $("#omniStatus").textContent = `❌ Lỗi gọi API: ${err.message || err}`;
+    }
+  };
+}
 $("#leadF").onchange = (e) => api("/api/settings", { lead_female_voice: e.target.value });
 $("#leadM").onchange = (e) => api("/api/settings", { lead_male_voice: e.target.value });
 $("#lanes").onchange = (e) => api("/api/settings", { parallel_lanes: e.target.checked });

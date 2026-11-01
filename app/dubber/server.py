@@ -25,7 +25,8 @@ WORKER: Worker | None = None
 
 EDITABLE = {"tts_mode", "workflow_mode", "threads", "paused", "keep_work_files", "video_bitrate", "duck_db", "max_speed",
             "parallel_lanes", "lead_female_voice", "lead_male_voice", "voice_variants", "tts_precision",
-            "voxcpm_model", "voxcpm_timesteps", "speech_rate_sps"}
+            "voxcpm_model", "voxcpm_timesteps", "speech_rate_sps", "voice_match_mode",
+            "omnivoice_model", "omnivoice_url", "omnivoice_steps"}
 VOICE_START = STEPS.index("tts")
 
 
@@ -176,6 +177,26 @@ class H(BaseHTTPRequestHandler):
                     s[k] = v
             paths.save_settings(s)
             return self._json({"ok": True})
+        if u.path == "/api/test_omnivoice":
+            s = paths.load_settings()
+            url = (b.get("url") if "url" in b else s.get("omnivoice_url") or "").strip().rstrip("/")
+            if url:
+                import urllib.request
+                try:
+                    req = urllib.request.Request(f"{url}/health", headers={"User-Agent": "DouyinDubber/1.0"})
+                    with urllib.request.urlopen(req, timeout=10) as resp:
+                        info = json.loads(resp.read().decode("utf-8"))
+                        return self._json({"ok": True, "mode": "remote_colab", "info": info})
+                except Exception as e:
+                    return self._json({"ok": False, "error": f"Không kết nối được tới Colab ({e})"})
+            else:
+                try:
+                    import omnivoice
+                    import torch
+                    gpu = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU"
+                    return self._json({"ok": True, "mode": "local_gpu", "info": {"device": gpu, "model": s.get("omnivoice_model")}})
+                except Exception:
+                    return self._json({"ok": False, "error": "Chưa nhập link Colab T4 (hoặc máy chưa cài trực tiếp omnivoice)."})
         if u.path == "/api/open":
             target = paths.OUTPUT
             if b.get("id"):

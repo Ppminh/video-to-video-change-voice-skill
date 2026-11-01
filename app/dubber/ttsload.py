@@ -589,8 +589,253 @@ class HybridTTSWrapper(EdgeTTSWrapper):
         return super().infer(text, voice=voice, **kwargs)
 
 
+class OmniVoiceWrapper:
+    """Wrapper cho k2-fsa/OmniVoice (600+ ngôn ngữ, Zero-Shot Voice Cloning & Duration Control).
+    Hỗ trợ 2 chế độ:
+    1. Kết nối từ xa tới Google Colab T4 GPU qua HTTP API (Cloudflare Tunnel / Gradio / Ngrok).
+    2. Chạy trực tiếp trên GPU CUDA / CPU nếu thư viện `omnivoice` được cài đặt tại chỗ (khi chạy trọn gói trên Colab T4).
+    """
+    def __init__(
+        self,
+        model_id: str = "k2-fsa/OmniVoice",
+        colab_url: str | None = None,
+        num_step: int = 32,
+        device: str | None = None,
+    ):
+        from . import paths
+        s = paths.load_settings()
+        self.model_id = (model_id or s.get("omnivoice_model") or "k2-fsa/OmniVoice").strip()
+        self.colab_url = (colab_url if colab_url is not None else (s.get("omnivoice_url") or os.environ.get("OMNIVOICE_URL") or "")).strip().rstrip("/")
+        self.num_step = int(num_step or s.get("omnivoice_steps") or 32)
+        self.device = device
+        self.sample_rate = 24000
+        self._local_model = None
+        self._local_model_id = None
+        self._preset_voices = {
+            "Gốc (OmniVoice Clone)": {"gender": "auto", "engine": "OmniVoice"},
+            "Hoài My": {"gender": "female", "engine": "OmniVoice"},
+            "Nam Minh": {"gender": "male", "engine": "OmniVoice"},
+            "Thục Đoan": {"gender": "female", "engine": "OmniVoice"},
+            "Thái Sơn": {"gender": "male", "engine": "OmniVoice"},
+        }
+
+    def _refresh_config(self):
+        from . import paths
+        s = paths.load_settings()
+        url = (s.get("omnivoice_url") or os.environ.get("OMNIVOICE_URL") or self.colab_url or "").strip().rstrip("/")
+        if url:
+            self.colab_url = url
+        m = (s.get("omnivoice_model") or self.model_id or "k2-fsa/OmniVoice").strip()
+        if m:
+            self.model_id = m
+        self.num_step = int(s.get("omnivoice_steps") or self.num_step or 32)
+
+    def _load_local_model(self):
+        import torch
+        from omnivoice import OmniVoice
+        if self._local_model is not None and self._local_model_id == self.model_id:
+            return self._local_model
+        dev = self.device or ("cuda:0" if torch.cuda.is_available() else "cpu")
+        dtype = torch.float16 if "cuda" in str(dev) else torch.float32
+        self._local_model = OmniVoice.from_pretrained(
+            self.model_id,
+            device_map=dev,
+            dtype=dtype,
+        )
+        self._local_model_id = self.model_id
+        return self._local_model
+
+    def _infer_remote_colab(
+        self,
+        text: str,
+        ref_wav: str | None = None,
+        ref_text: str | None = None,
+        duration: float | None = None,
+        speed: float = 1.0,
+        instruct: str | None = None,
+    ):
+        import base64
+        import io
+        import json
+        import time
+        import urllib.request
+        import numpy as np
+        import soundfile as sf
+
+        ref_b64 = None
+        if ref_wav and Path(ref_wav).exists():
+            ref_b64 = base64.b64encode(Path(ref_wav).read_bytes()).decode("ascii")
+
+        payload = {
+            "text": text,
+            "language": "vi",
+            "ref_audio_b64": ref_b64,
+            "ref_text": (ref_text or "").strip() or None,
+            "duration": float(duration) if (duration and duration > 0.3) else None,
+            "speed": float(speed or 1.0),
+            "num_step": int(self.num_step),
+            "model_id": self.model_id,
+            "instruct": instruct,
+        }
+        data_bytes = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        endpoint = f"{self.colab_url}/synthesize"
+
+        last_err = None
+        for attempt in range(3):
+            try:
+                req = urllib.request.Request(
+                    endpoint,
+                    data=data_bytes,
+                    headers={
+                        "Content-Type": "application/json; charset=utf-8",
+                        "User-Agent": "DouyinDubber-OmniVoice/1.0",
+                    },
+                    method="POST",
+                )
+                with urllib.request.urlopen(req, timeout=90) as resp:
+                    ctype = resp.headers.get("Content-Type", "")
+                    raw = resp.read()
+                    if "application/json" in ctype:
+                        j = json.loads(raw.decode("utf-8"))
+                        if j.get("error"):
+                            raise RuntimeError(j["error"])
+                        wav_bytes = base64.b64decode(j["audio_b64"])
+                    else:
+                        wav_bytes = raw
+
+                audio, sr = sf.read(io.BytesIO(wav_bytes), dtype="float32")
+                if audio.ndim > 1:
+                    audio = np.mean(audio, axis=-1)
+                if sr != self.sample_rate:
+                    import scipy.signal
+                    num_s = int(len(audio) * self.sample_rate / sr)
+                    if num_s > 0:
+                        audio = scipy.signal.resample(audio, num_s).astype(np.float32)
+                return np.nan_to_num(audio.astype(np.float32), nan=0.0, posinf=0.0, neginf=0.0)
+            except Exception as e:
+                last_err = e
+                time.sleep(2 * (attempt + 1))
+
+        raise RuntimeError(f"Lỗi kết nối máy chủ OmniVoice trên Google Colab T4 ({self.colab_url}): {last_err}")
+
+    def _infer_local(
+        self,
+        text: str,
+        ref_wav: str | None = None,
+        ref_text: str | None = None,
+        duration: float | None = None,
+        speed: float = 1.0,
+        instruct: str | None = None,
+    ):
+        import inspect
+        import numpy as np
+        import torch
+
+        model = self._load_local_model()
+        sig = inspect.signature(model.generate)
+        accepted = set(sig.parameters.keys())
+        has_var_kw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
+
+        kw = {"text": text}
+        opt_params = {
+            "language": "vi",
+            "num_step": int(self.num_step),
+            "speed": float(speed or 1.0),
+        }
+        if ref_wav and Path(ref_wav).exists():
+            opt_params["ref_audio"] = str(ref_wav)
+            if ref_text and str(ref_text).strip():
+                opt_params["ref_text"] = str(ref_text).strip()
+        elif instruct:
+            opt_params["instruct"] = instruct
+
+        if duration and duration > 0.3:
+            opt_params["duration"] = float(duration)
+
+        for k, v in opt_params.items():
+            if v is not None and (k in accepted or has_var_kw):
+                kw[k] = v
+
+        audio_out = model.generate(**kw)
+        if isinstance(audio_out, (list, tuple)):
+            wav = audio_out[0]
+        else:
+            wav = audio_out
+        if isinstance(wav, torch.Tensor):
+            wav = wav.detach().cpu().float().numpy()
+        wav = np.asarray(wav, dtype=np.float32).squeeze()
+        if wav.ndim > 1:
+            wav = np.mean(wav, axis=0)
+        return np.nan_to_num(wav, nan=0.0, posinf=0.0, neginf=0.0)
+
+    def infer(
+        self,
+        text: str,
+        voice: str | None = None,
+        ref_wav: str | None = None,
+        ref_text: str | None = None,
+        duration: float | None = None,
+        speed: float = 1.0,
+        gender: str | None = None,
+        age: str | None = None,
+        **kwargs,
+    ):
+        import numpy as np
+        clean_txt = (text or "").strip()
+        if not clean_txt or not any(c.isalnum() for c in clean_txt):
+            return np.zeros(int(self.sample_rate * 0.4), dtype=np.float32)
+
+        if not ref_wav and kwargs.get("ref_audio"):
+            ref_wav = kwargs.get("ref_audio")
+
+        self._refresh_config()
+
+        # Tạo instruct dự phòng nếu câu thoại không có mẫu ref_wav
+        g_tag = "female" if gender == "female" or (voice and any(w in str(voice).lower() for w in ("nữ", "female", "hoài my", "thục đoan"))) else "male"
+        age_map = {"child": "child", "young": "young adult", "adult": "middle-aged", "old": "elderly"}
+        a_tag = age_map.get(str(age or "young"), "young adult")
+        instruct = f"{g_tag}, {a_tag}, moderate pitch"
+
+        if self.colab_url:
+            return self._infer_remote_colab(
+                clean_txt,
+                ref_wav=ref_wav,
+                ref_text=ref_text,
+                duration=duration,
+                speed=speed,
+                instruct=instruct,
+            )
+
+        # Nếu không có colab_url, thử chạy trực tiếp bằng thư viện omnivoice tại chỗ (Colab local / GPU local)
+        try:
+            import omnivoice  # noqa: F401
+        except ImportError:
+            raise RuntimeError(
+                "Bạn đang chọn chế độ OmniVoice nhưng chưa dán Link Google Colab T4 vào ô 'Link Colab OmniVoice' trên giao diện Web "
+                "(hoặc chưa chạy Notebook OmniVoice_Colab_T4.ipynb)."
+            )
+
+        return self._infer_local(
+            clean_txt,
+            ref_wav=ref_wav,
+            ref_text=ref_text,
+            duration=duration,
+            speed=speed,
+            instruct=instruct,
+        )
+
+    def list_preset_voices(self):
+        return [(name, name) for name in self._preset_voices]
+
+
 def load(mode: str = "edgetts", threads: int = 4, precision: str = "fp32", **kwargs):
     clean_mode = str(mode or "").lower().replace("-", "").replace("_", "").strip()
+    if clean_mode in ("omnivoice", "omni", "k2omnivoice"):
+        return OmniVoiceWrapper(
+            model_id=kwargs.get("omnivoice_model"),
+            colab_url=kwargs.get("omnivoice_url"),
+            num_step=int(kwargs.get("omnivoice_steps", 32)),
+        )
     if clean_mode in ("edgetts", "hybrid", "turbohybrid", "edge"):
         return HybridTTSWrapper(threads=threads, precision=precision, **kwargs)
     if clean_mode == "edgepure":

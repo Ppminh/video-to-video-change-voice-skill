@@ -45,6 +45,9 @@ DEFAULT_SETTINGS = {
     "workflow_mode": "dub",
     # edgetts = Microsoft Edge-TTS (truyền cảm, siêu tốc, đa cảm xúc), turbo = VieNeu Turbo, voxcpm = VoxCPM2, nano = VieNeu Nano
     "tts_mode": "edgetts",
+    "omnivoice_model": "k2-fsa/OmniVoice",
+    "omnivoice_url": "",
+    "omnivoice_steps": 32,
     "voxcpm_model": "openbmb/VoxCPM2",
     "voxcpm_timesteps": 10,
     # số luồng CPU cho model

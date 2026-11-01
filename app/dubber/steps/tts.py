@@ -231,7 +231,11 @@ def cast(job: Job, tts_mode: str, available: dict, speaker_f0_profiles: dict | N
         pick_variant = ""
         engine = "Edge-TTS"
 
-        if is_hybrid:
+        if clean_mode in ("omnivoice", "omni", "k2omnivoice"):
+            pick_base = f"Gốc #{spk} (OmniVoice)"
+            pick_variant = ""
+            engine = "OmniVoice"
+        elif is_hybrid:
             # R1: Edge-TTS làm chủ đạo cho nhân vật chính
             lead_cfg = (s.get(f"lead_{voice_g}_voice") or "").strip()
             edge_lead = lead_cfg if lead_cfg in EDGE_TTS_VOICES.get(voice_g, []) else EDGE_TTS_VOICES.get(voice_g, ["Hoài My" if voice_g == "female" else "Nam Minh"])[0]
@@ -365,7 +369,10 @@ def run(job: Job) -> None:
     from ..ttsload import load as load_tts
     tts = load_tts(mode, threads(), s.get("tts_precision", "fp32"),
                    voxcpm_model=s.get("voxcpm_model", "openbmb/VoxCPM2"),
-                   voxcpm_timesteps=s.get("voxcpm_timesteps", 10))
+                   voxcpm_timesteps=s.get("voxcpm_timesteps", 10),
+                   omnivoice_model=s.get("omnivoice_model", "k2-fsa/OmniVoice"),
+                   omnivoice_url=s.get("omnivoice_url", ""),
+                   omnivoice_steps=s.get("omnivoice_steps", 32))
     sr = int(tts.sample_rate)
     presets = getattr(tts, "_preset_voices", {}) or {}
     available = {name: (v.get("gender") or "") for name, v in presets.items()}
@@ -412,13 +419,14 @@ def run(job: Job) -> None:
     log("Phân vai tóm tắt: " + ", ".join(summary_parts))
     log(f"Nạp model & phân vai xong sau {time.time() - t0:.1f}s")
 
-    # Đọc vocals để phục vụ Spectral Match EQ và Zero-shot voice cloning
+    # Đọc vocals chất lượng cao (ưu tiên vocals.wav full-bandwidth) để phục vụ Spectral Match EQ và Zero-shot voice cloning
     orig_vocals = None
     orig_vocals_sr = 16000
+    hi_vocals_f = job.p("vocals.wav") if job.p("vocals.wav").exists() else vocals_f
     try:
         import soundfile as sf
-        if vocals_f.exists():
-            orig_vocals, orig_vocals_sr = sf.read(str(vocals_f), dtype="float32")
+        if hi_vocals_f.exists():
+            orig_vocals, orig_vocals_sr = sf.read(str(hi_vocals_f), dtype="float32")
             if orig_vocals is not None:
                 orig_vocals = np.nan_to_num(orig_vocals, nan=0.0, posinf=0.0, neginf=0.0)
                 if orig_vocals.ndim > 1:
@@ -426,35 +434,45 @@ def run(job: Job) -> None:
     except Exception as e:
         log(f"Không thể đọc vocals để Match EQ: {e}")
 
-    # Trích xuất mẫu giọng chuẩn 3-8s của từng nhân vật phục vụ Voice Cloning
+    # Trích xuất mẫu giọng chuẩn 3-10s kèm văn bản gốc của từng nhân vật phục vụ Voice Cloning
     speaker_ref_wavs = {}
+    speaker_ref_texts = {}
+    spk_snippets_dir = out_dir / "spk_refs"
     if orig_vocals is not None:
-        spk_snippets_dir = out_dir / "spk_refs"
         spk_snippets_dir.mkdir(parents=True, exist_ok=True)
-        for spk_id in tr.get("speakers", {}):
+        all_spk_ids = set(str(k) for k in tr.get("speakers", {}).keys()) | set(str(l.get("spk", 0)) for l in lines)
+        for spk_id in all_spk_ids:
             best_line = None
             best_dur = 0.0
             for l_cand in lines:
-                if l_cand.get("spk") == spk_id:
+                if str(l_cand.get("spk")) == str(spk_id):
                     d_c = float(l_cand["end"]) - float(l_cand["start"])
-                    if 3.0 <= d_c <= 8.0 and d_c > best_dur:
+                    if 3.0 <= d_c <= 10.0 and d_c > best_dur:
                         best_line = l_cand
                         best_dur = d_c
             if not best_line:
                 for l_cand in lines:
-                    if l_cand.get("spk") == spk_id:
+                    if str(l_cand.get("spk")) == str(spk_id):
                         d_c = float(l_cand["end"]) - float(l_cand["start"])
                         if d_c > best_dur:
                             best_line = l_cand
                             best_dur = d_c
             if best_line:
                 s_idx = max(0, int(float(best_line["start"]) * orig_vocals_sr))
-                e_idx = min(len(orig_vocals), int(float(best_line["end"]) * orig_vocals_sr))
+                e_idx = min(len(orig_vocals), int(min(float(best_line["end"]), float(best_line["start"]) + 10.0) * orig_vocals_sr))
                 clip = orig_vocals[s_idx:e_idx]
-                if len(clip) > int(orig_vocals_sr * 1.0):
+                if len(clip) > int(orig_vocals_sr * 0.8):
                     ref_p = spk_snippets_dir / f"spk_{spk_id}.wav"
                     save_audio(ref_p, clip, orig_vocals_sr)
                     speaker_ref_wavs[spk_id] = str(ref_p)
+                    speaker_ref_wavs[str(spk_id)] = str(ref_p)
+                    if str(spk_id).isdigit():
+                        speaker_ref_wavs[int(spk_id)] = str(ref_p)
+                    zh_txt = (best_line.get("zh") or best_line.get("text") or "").strip()
+                    speaker_ref_texts[spk_id] = zh_txt
+                    speaker_ref_texts[str(spk_id)] = zh_txt
+                    if str(spk_id).isdigit():
+                        speaker_ref_texts[int(spk_id)] = zh_txt
 
     def cinfo(ln):
         spk = ln.get("spk")
@@ -469,7 +487,36 @@ def run(job: Job) -> None:
         p_info = pitch_profiles.get(ln["id"]) or pitch_profiles.get(str(ln["id"])) or {}
         prosody = map_pitch_to_prosody(p_info, voice_name=c["voice"], base_voice=c["base"], emotion=emo, safe_volume=True)
         engine = c.get("engine", "Edge-TTS")
-        if clean_mode in ("voxcpm", "valtec_zeroshot"):
+        if clean_mode in ("omnivoice", "omni", "k2omnivoice"):
+            # Cắt giọng diễn viên gốc (3-10s) để sao chép y hệt cả màu giọng lẫn ngữ điệu câu thoại gốc
+            ref_wav = speaker_ref_wavs.get(ln["spk"]) or speaker_ref_wavs.get(str(ln["spk"]))
+            ref_text = speaker_ref_texts.get(ln["spk"]) or speaker_ref_texts.get(str(ln["spk"])) or ""
+            orig_dur = max(0.4, float(ln["end"]) - float(ln["start"]))
+            if orig_vocals is not None:
+                s_idx = max(0, int(float(ln["start"]) * orig_vocals_sr))
+                e_idx = min(len(orig_vocals), int(min(float(ln["end"]), float(ln["start"]) + 10.0) * orig_vocals_sr))
+                utt_clip = orig_vocals[s_idx:e_idx]
+                # Nếu câu thoại gốc đủ dài (>= 2.4s) và có năng lượng giọng rõ ràng -> dùng chính câu đó làm mẫu để giữ 100% ngữ điệu & cảm xúc câu
+                if len(utt_clip) >= int(orig_vocals_sr * 2.4) and float(np.max(np.abs(utt_clip))) > 0.02:
+                    utt_p = spk_snippets_dir / f"utt_{ln['id']:04d}.wav"
+                    save_audio(utt_p, utt_clip, orig_vocals_sr)
+                    ref_wav = str(utt_p)
+                    ref_text = (ln.get("zh") or ln.get("text") or "").strip()
+
+            # Tính toán duration mục tiêu khớp với độ dài câu gốc và cửa sổ thời gian
+            w = window(idx[ln["id"]]) if ln["id"] in idx else orig_dur
+            est_dur = max(0.5, vi_syllables(text) / 4.3)
+            target_dur = min(w, max(orig_dur * 0.9, min(est_dur, orig_dur * 1.25)))
+            a = tts.infer(
+                normalize_vi(text),
+                voice=c["voice"],
+                ref_wav=ref_wav,
+                ref_text=ref_text,
+                duration=round(target_dur, 2),
+                gender=c.get("gender"),
+                age=c.get("age"),
+            )
+        elif clean_mode in ("voxcpm", "valtec_zeroshot"):
             ref_wav = speaker_ref_wavs.get(ln["spk"])
             if not ref_wav and clean_mode == "voxcpm":
                 sample_dir = paths.LOGS / "giong_mau"
